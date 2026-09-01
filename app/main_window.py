@@ -147,6 +147,12 @@ class MainWindow(QMainWindow):
         # Напоминания — запускаем после появления окна
         QTimer.singleShot(500, self._start_reminders)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        # Обои должны растягиваться на всё окно (иначе останутся крошечными
+        # в углу — их размер layout'ом не управляется).
+        self.bg.setGeometry(self.centralWidget().rect())
+        super().resizeEvent(event)
+
     # ==================================================================
     #  Верхняя панель
     # ==================================================================
