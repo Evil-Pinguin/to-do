@@ -14,7 +14,7 @@ from typing import List, Optional
 from .formatting import now_str
 from .models import Note, Group, dump_list, ListItem, TYPE_NOTE, TYPE_LIST, TYPE_TASK
 
-APP_DIR = Path(__file__).resolve().parent.parent
+from .paths import APP_DIR
 DATA_DIR = Path(os.environ.get("AERO_NOTES_DATA") or (APP_DIR / "data"))
 DEFAULT_DB_PATH = DATA_DIR / "notes.db"
 
