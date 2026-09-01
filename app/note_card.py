@@ -47,10 +47,14 @@ class GlassCard(QFrame):
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         hovered = self.underMouse()
-        # hover-lift: стекло приподнимается на 2px
-        lift = 2.0 if hovered else 0.0
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5 - lift)
-        rect.translate(0, -0.0 if not hovered else 0.0)
+        if T.is_frosted():
+            # frosted: стекло «вырастает» на hover (аналог scale 1.02)
+            inset = 0.5 if hovered else 3.0
+            rect = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
+        else:
+            # hover-lift: стекло приподнимается на 2px
+            lift = 2.0 if hovered else 0.0
+            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5 - lift)
         glow = None
         if hovered:
             gp = self.mapFromGlobal(QCursor.pos())

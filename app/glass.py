@@ -80,7 +80,11 @@ def draw_frosted_backdrop(p: QPainter, path: QPainterPath, widget) -> bool:
 
 
 def blur_pixmap(src: QPixmap, strength: int = 14) -> QPixmap:
-    """Дешёвый сильный blur: уменьшить → увеличить с smooth-фильтрацией."""
+    """Дешёвый сильный blur: уменьшить → увеличить с smooth-фильтрацией.
+
+    После размытия слегка осветляем и насыщаем (аналог saturate(160%)) —
+    как в настоящем backdrop-filter у Apple.
+    """
     if src.isNull():
         return src
     w = max(1, src.width() // strength)
@@ -89,8 +93,20 @@ def blur_pixmap(src: QPixmap, strength: int = 14) -> QPixmap:
     # двойной проход даёт более гладкий результат
     small = small.scaled(max(1, w * 2), max(1, h * 2),
                          Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-    return small.scaled(src.width(), src.height(),
-                        Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    out = small.scaled(src.width(), src.height(),
+                       Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    p = QPainter(out)
+    # насыщение/контраст: наложение копии на саму себя в режиме Overlay
+    base = out.copy()
+    p.setCompositionMode(QPainter.CompositionMode_Overlay)
+    p.setOpacity(0.30)
+    p.drawPixmap(0, 0, base)
+    # лёгкое осветление
+    p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+    p.setOpacity(1.0)
+    p.fillRect(out.rect(), QColor(255, 255, 255, 14))
+    p.end()
+    return out
 # Холодный тон кромки-линзы (взят с края пузыря: #BDE4EB, чуть темнее).
 _RIM_COOL = (125, 170, 195)
 
@@ -148,10 +164,11 @@ def _paint_frosted_rect(
 
     has_backdrop = draw_frosted_backdrop(p, path, widget)
     if has_backdrop:
-        # тонкий слой стекла: 25% → 8% как в референсе
+        # тонкий, почти бесцветный слой стекла; «толщину» задаёт milk:
+        # карточки тоньше (milk~20), панели плотнее (milk~60)
         body = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        body.setColorAt(0.0, QColor(255, 255, 255, 64))
-        body.setColorAt(1.0, QColor(255, 255, 255, 20))
+        body.setColorAt(0.0, QColor(255, 255, 255, min(200, milk + 36)))
+        body.setColorAt(1.0, QColor(255, 255, 255, max(8, milk - 6)))
         p.fillPath(path, body)
     else:
         body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
@@ -159,7 +176,8 @@ def _paint_frosted_rect(
         body.setColorAt(1.0, QColor(255, 255, 255, milk))
         p.fillPath(path, body)
     if tint_rgb is not None:
-        p.fillPath(path, QColor(tint_rgb[0], tint_rgb[1], tint_rgb[2], 26))
+        # цвет — едва заметный оттенок: стекло почти бесцветно
+        p.fillPath(path, QColor(tint_rgb[0], tint_rgb[1], tint_rgb[2], 14))
 
     p.save()
     p.setClipPath(path)
@@ -170,6 +188,11 @@ def _paint_frosted_rect(
     spec.setColorAt(0.70, QColor(255, 255, 255, 0))
     spec.setColorAt(1.00, QColor(255, 255, 255, 30))
     p.fillPath(path, spec)
+    if hover:
+        # при наведении блик усиливается — стекло «оживает»
+        p.setOpacity(0.5)
+        p.fillPath(path, spec)
+        p.setOpacity(1.0)
     # верхняя внутренняя световая нить (inset 0 1px)
     p.setPen(QPen(QColor(255, 255, 255, 120), 1.0))
     p.drawLine(QPointF(rect.x() + radius * 0.7, rect.y() + 1.0),
@@ -220,8 +243,8 @@ def paint_bubble_glass(
             # диалоги/редактор: плотное молочное стекло — тёмный текст читается
             _paint_frosted_rect(p, rect, radius, milk=205, widget=widget)
         else:
-            # панели: настоящее стекло — размытый фон просвечивает
-            _paint_frosted_rect(p, rect, radius, milk=30, widget=widget)
+            # панели: стекло плотнее карточек (как tab bar у Apple)
+            _paint_frosted_rect(p, rect, radius, milk=62, widget=widget)
         return
 
     path = QPainterPath()
@@ -343,9 +366,9 @@ def paint_bubble_card(
         _paint_minimal_rect(p, rect, 12.0, tint, 255, hover=hover)
         return
     if theme.is_frosted():
-        # Frosted: размытый фон под стеклом, цвет заметки — лёгкий оттенок
+        # Frosted: тонкое почти бесцветное стекло, цвет — едва заметный оттенок
         _paint_frosted_rect(p, rect, radius, tint_rgb=base_rgb,
-                            milk=48, hover=hover, glow_pos=glow_pos,
+                            milk=20, hover=hover, glow_pos=glow_pos,
                             widget=widget)
         return
 

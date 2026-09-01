@@ -135,7 +135,8 @@ class BackgroundWidget(QWidget):
             # пузыри-линзы: увеличивают фон под собой, как настоящее стекло
             p.setRenderHint(QPainter.Antialiasing)
             for (fx, fy, r, phase, amp) in self._BUBBLES:
-                x = fx * rect.width()
+                # медленный дрейф по обеим осям — параллакс «жидкости»
+                x = fx * rect.width() + amp * 0.8 * math.cos(self._t * 0.21 + phase)
                 y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
                 self._paint_lens_bubble(p, x, y, r)
             p.end()
@@ -148,7 +149,7 @@ class BackgroundWidget(QWidget):
         # декоративные пузыри — почти прозрачные, медленно дышат
         p.setRenderHint(QPainter.Antialiasing)
         for (fx, fy, r, phase, amp) in self._BUBBLES:
-            x = fx * rect.width()
+            x = fx * rect.width() + amp * 0.8 * math.cos(self._t * 0.21 + phase)
             y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
             paint_bubble_circle(p, QRectF(x - r, y - r, r * 2, r * 2))
         p.end()
@@ -1170,6 +1171,10 @@ class MainWindow(QMainWindow):
         белый текст, яркие акценты."""
         A = theme.FR_ACCENT
         self.setStyleSheet(f"""
+            QWidget {{
+                font-family: "Segoe UI Variable Text", "Segoe UI", "Inter",
+                             "SF Pro Text", sans-serif;
+            }}
             MainWindow, BackgroundWidget {{ background: {theme.FR_BG_TOP}; }}
             GlassPanel {{ background: transparent; border: none; }}
 
@@ -1224,13 +1229,13 @@ class MainWindow(QMainWindow):
             QToolButton::menu-indicator {{ image: none; }}
             QToolButton#newButton {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba(96,165,250,235), stop:1 rgba(59,130,246,235));
+                    stop:0 rgba(120,180,255,165), stop:1 rgba(59,130,246,120));
                 color: white; font-weight: 700;
-                border: 1px solid rgba(255,255,255,120);
+                border: 1px solid rgba(255,255,255,150);
             }}
             QToolButton#newButton:hover {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba(125,185,255,245), stop:1 rgba(80,145,250,245));
+                    stop:0 rgba(140,195,255,200), stop:1 rgba(80,145,250,160));
             }}
             QToolButton#pinFab {{
                 background: rgba(255,255,255,50);

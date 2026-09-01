@@ -57,7 +57,7 @@ def text_primary() -> str:
 
 def text_muted() -> str:
     if is_frosted():
-        return "rgba(255,255,255,180)"
+        return "rgba(255,255,255,166)"
     if is_minimal():
         return MIN_MUTED
     return "#5A7188"
