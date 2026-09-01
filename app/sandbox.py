@@ -104,7 +104,7 @@ class SandboxCard(QFrame):
         fm = QFontMetrics(f)
         emoji = TYPE_EMOJI.get(self.note.type, "📝")
         title = fm.elidedText(
-            f"{emoji} {self.note.display_title()}", Qt.ElideRight,
+            f"{emoji} {self.note.display_title}", Qt.ElideRight,
             self.width() - 2 * pad,
         )
         p.drawText(QRect(pad, 12, self.width() - 2 * pad, 18), Qt.AlignLeft, title)
@@ -452,7 +452,7 @@ class SandboxWindow(QMainWindow):
         sub.setStyleSheet(self.menu_qss())
         for n in notes[:40]:
             emoji = TYPE_EMOJI.get(n.type, "📝")
-            title = n.display_title()
+            title = n.display_title
             if len(title) > 40:
                 title = title[:40] + "…"
             sub.addAction(f"{emoji} {title}",
