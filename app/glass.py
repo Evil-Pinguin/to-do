@@ -19,12 +19,17 @@ from PySide6.QtGui import (
     QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
 )
 
-from . import theme
+from . import ambient, theme
 
-# Оттенок окружения для нижнего рефлекса (небо у горизонта + трава).
+# Оттенок окружения для нижнего рефлекса (по умолчанию; живой берём из ambient).
 _ENV_REFLEX = (191, 231, 226)
 # Холодный тон кромки-линзы (взят с края пузыря: #BDE4EB, чуть темнее).
 _RIM_COOL = (125, 170, 195)
+
+
+def _env_reflex() -> tuple[int, int, int]:
+    """Цвет рефлекса из текущего времени суток."""
+    return ambient.palette()["reflex"]
 
 
 def _mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
@@ -149,7 +154,7 @@ def paint_bubble_glass(
         p.drawEllipse(QPointF(cx, cy), srad * 0.8, srad * 0.8)
 
     # ---- 5. Нижний рефлекс — цветной, от окружения -------------------------
-    env = _mix(_ENV_REFLEX, base_rgb, 0.35)
+    env = _mix(_env_reflex(), base_rgb, 0.35)
     ref_h = rect.height() * 0.24
     ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
     ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
@@ -176,11 +181,13 @@ def paint_bubble_card(
     radius: float,
     base_rgb: tuple[int, int, int],
     hover: bool = False,
+    glow_pos: "QPointF | None" = None,
 ) -> None:
     """Прямоугольный «мыльный пузырь» — как paint_bubble_circle, но для карточек.
 
     Центр почти прозрачный (линза), цвет заметки сконцентрирован у краёв,
     как плёнка пузыря; рим, полумесяц, искра и цветной рефлекс — те же.
+    ``glow_pos`` — позиция курсора: мягкое свечение следует за мышью.
     """
     p.setRenderHint(QPainter.Antialiasing)
 
@@ -196,10 +203,12 @@ def paint_bubble_card(
     r_, g_, b_ = base_rgb
 
     # ---- 1. Центр: лёгкая дымка (читаемость текста) + едва заметный тон ----
+    # ночью дымка плотнее, чтобы тёмный текст читался на тёмном фоне
+    boost = ambient.palette()["haze_boost"]
     haze = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-    haze.setColorAt(0.0, QColor(255, 255, 255, 60))
-    haze.setColorAt(0.5, QColor(255, 255, 255, 44))
-    haze.setColorAt(1.0, QColor(255, 255, 255, 56))
+    haze.setColorAt(0.0, QColor(255, 255, 255, min(255, 60 + boost)))
+    haze.setColorAt(0.5, QColor(255, 255, 255, min(255, 44 + boost)))
+    haze.setColorAt(1.0, QColor(255, 255, 255, min(255, 56 + boost)))
     p.fillPath(path, haze)
     p.fillPath(path, QColor(r_, g_, b_, 34))
 
@@ -258,7 +267,7 @@ def paint_bubble_card(
         p.drawEllipse(QPointF(cx, cy), w / 2, h / 2)
 
     # ---- 7. Нижний цветной рефлекс -------------------------------------------
-    env = _mix(_ENV_REFLEX, base_rgb, 0.30)
+    env = _mix(_env_reflex(), base_rgb, 0.30)
     ref_h = rect.height() * 0.26
     ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
     ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
@@ -267,7 +276,15 @@ def paint_bubble_card(
     p.fillPath(path, ref)
 
     if hover:
-        p.fillPath(path, QColor(255, 255, 255, 26))
+        p.fillPath(path, QColor(255, 255, 255, 22))
+
+    # ---- 7b. Hover-свет: слабое свечение следует за курсором ---------------
+    if glow_pos is not None:
+        glow = QRadialGradient(glow_pos, max(rect.width(), rect.height()) * 0.45)
+        glow.setColorAt(0.0, QColor(255, 255, 255, 44))
+        glow.setColorAt(0.4, QColor(255, 255, 255, 16))
+        glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.fillPath(path, glow)
 
     p.restore()
 
@@ -364,8 +381,9 @@ def paint_bubble_circle(
     bottom_half.addRect(QRectF(rect.x(), center.y(), rect.width(), rect.height()))
     reflex = reflex.intersected(bottom_half)
     ref_g = QLinearGradient(QPointF(rect.x(), center.y()), rect.bottomLeft())
-    ref_g.setColorAt(0.0, QColor(_ENV_REFLEX[0], _ENV_REFLEX[1], _ENV_REFLEX[2], 0))
-    ref_g.setColorAt(1.0, QColor(_ENV_REFLEX[0], _ENV_REFLEX[1], _ENV_REFLEX[2], 120))
+    env_c = _env_reflex()
+    ref_g.setColorAt(0.0, QColor(env_c[0], env_c[1], env_c[2], 0))
+    ref_g.setColorAt(1.0, QColor(env_c[0], env_c[1], env_c[2], 120))
     p.fillPath(reflex, ref_g)
 
     if pressed:

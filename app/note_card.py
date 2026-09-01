@@ -5,9 +5,9 @@ from __future__ import annotations
 import html
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRect, QRectF
+from PySide6.QtCore import Qt, Signal, QPoint, QPointF, QSize, QRect, QRectF, QTimer
 from PySide6.QtGui import (
-    QColor, QFont, QPainter, QPixmap,
+    QColor, QCursor, QFont, QPainter, QPixmap,
 )
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout,
@@ -23,13 +23,21 @@ PREVIEW_CHARS = 420
 
 
 class GlassCard(QFrame):
-    """Базовый glass-виджет: рисует многослойный эффект жидкого стекла."""
+    """Базовый glass-виджет: рисует многослойный эффект жидкого стекла.
+
+    При наведении карточка чуть «всплывает», а за курсором следует
+    слабое световое пятно — стекло реагирует на пользователя.
+    """
 
     def __init__(self, color_key: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._color_key = color_key
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setObjectName("glassCard")
+        # таймер работает только пока мышь над карточкой (~20 fps)
+        self._glow_timer = QTimer(self)
+        self._glow_timer.setInterval(50)
+        self._glow_timer.timeout.connect(self.update)
 
     def set_color(self, key: str) -> None:
         self._color_key = key
@@ -37,21 +45,33 @@ class GlassCard(QFrame):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        hovered = self.underMouse()
+        # hover-lift: стекло приподнимается на 2px
+        lift = 2.0 if hovered else 0.0
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5 - lift)
+        rect.translate(0, -0.0 if not hovered else 0.0)
+        glow = None
+        if hovered:
+            gp = self.mapFromGlobal(QCursor.pos())
+            if self.rect().contains(gp):
+                glow = QPointF(gp)
         # Карточка = прямоугольный мыльный пузырь: прозрачный центр-линза,
         # цветная «плёнка» по краям, полумесяц + искра (см. app/glass.py).
         paint_bubble_card(
-            p, rect, 16.0,
+            p, rect, 20.0,
             base_rgb=C.base_rgb(self._color_key),
-            hover=self.underMouse(),
+            hover=hovered,
+            glow_pos=glow,
         )
         p.end()
 
     def enterEvent(self, event) -> None:  # noqa: N802
+        self._glow_timer.start()
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
+        self._glow_timer.stop()
         self.update()
         super().leaveEvent(event)
 
@@ -232,9 +252,12 @@ class NoteCard(GlassCard):
                 parts.append(f'<b style="color:{col};">{html.escape(dl_txt)}</b>')
             if n.priority:
                 pcol = C.PRIORITY_COLORS.get(n.priority, ("", "#888"))[1]
+                # маленький «стеклянный бейдж», а не просто цветной текст
                 parts.append(
-                    f'<span style="color:{pcol};">● {PRIORITY_NAMES.get(n.priority, n.priority)}'
-                    f" приоритет</span>"
+                    f'<span style="background-color: rgba(255,255,255,110);'
+                    f' color:{pcol}; font-weight:600;">'
+                    f"&nbsp;● {PRIORITY_NAMES.get(n.priority, n.priority)}"
+                    f" приоритет&nbsp;</span>"
                 )
             body = html.escape("\n".join(n.content.splitlines()[:5]))
             if body:

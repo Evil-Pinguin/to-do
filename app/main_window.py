@@ -8,6 +8,7 @@ from typing import List, Optional
 from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
 from PySide6.QtGui import (
     QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap,
+    QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QToolButton, QVBoxLayout, QWidget, QMessageBox,
 )
 
+from . import ambient
 from . import colors as C
 from . import theme
 from .bubbles import BubbleButton
@@ -22,10 +24,9 @@ from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
-from .glass import paint_bubble_glass
+from .glass import paint_bubble_glass, paint_bubble_circle
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
-from .paths import ASSETS_DIR
 from .reminder import ReminderManager, REMIND_OFFSETS
 
 SORT_MODES = [
@@ -42,39 +43,103 @@ SORT_MODES = [
 # ---------------------------------------------------------------------------
 
 class BackgroundWidget(QWidget):
-    """Рисует обои Frutiger Aero + мягкую светлую вуаль."""
+    """Живой фон Liquid Glass: световые пятна + медленно плавающие пузыри.
+
+    Палитра зависит от времени суток (app/ambient.py): утро/день/вечер/ночь.
+    Статичная часть (градиент + пятна) кешируется в QPixmap; каждый кадр
+    поверх рисуются только пузыри — дёшево.
+    """
+
+    # относительные позиции пузырей: (fx, fy, радиус_px, фаза, амплитуда_px)
+    _BUBBLES = [
+        (0.16, 0.30, 26, 0.0, 9),
+        (0.34, 0.68, 40, 1.7, 12),
+        (0.57, 0.22, 18, 3.1, 7),
+        (0.72, 0.55, 30, 4.4, 10),
+        (0.88, 0.78, 22, 2.3, 8),
+        (0.93, 0.16, 34, 5.2, 11),
+    ]
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._pix: Optional[QPixmap] = None
-        path = ASSETS_DIR / "backdrop.jpg"
-        if path.exists():
-            pm = QPixmap(str(path))
-            if not pm.isNull():
-                self._pix = pm
+        self._cache: Optional[QPixmap] = None
+        self._cache_key: tuple = ()
+        self._t = 0.0
+        # медленное дыхание пузырей (~8 кадров/с достаточно)
+        self._anim = QTimer(self)
+        self._anim.setInterval(120)
+        self._anim.timeout.connect(self._tick_anim)
+        self._anim.start()
+        # раз в минуту проверяем, не сменилось ли время суток
+        self._period = ambient.period()
+        self._clock = QTimer(self)
+        self._clock.setInterval(60_000)
+        self._clock.timeout.connect(self._check_period)
+        self._clock.start()
+
+    def _tick_anim(self) -> None:
+        if not self.isVisible() or theme.is_minimal():
+            return
+        self._t += 0.12
+        self.update()
+
+    def _check_period(self) -> None:
+        if ambient.period() != self._period:
+            self._period = ambient.period()
+            self._cache = None
+            win = self.window()
+            if win is not None:
+                win.update()
+            self.update()
+
+    def _rebuild_cache(self) -> None:
+        pal = ambient.palette()
+        w, h = max(1, self.width()), max(1, self.height())
+        pm = QPixmap(w, h)
+        p = QPainter(pm)
+        # небо — мягкий вертикальный градиент
+        sky = QLinearGradient(0, 0, 0, h)
+        sky.setColorAt(0.0, QColor(pal["sky"][0]))
+        sky.setColorAt(1.0, QColor(pal["sky"][1]))
+        p.fillRect(0, 0, w, h, sky)
+        # большие размытые световые пятна
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        for (r_, g_, b_, a_, fx, fy, fr) in pal["blobs"]:
+            rad = fr * max(w, h)
+            cx, cy = fx * w, fy * h
+            grad = QRadialGradient(cx, cy, rad)
+            grad.setColorAt(0.0, QColor(r_, g_, b_, a_))
+            grad.setColorAt(0.55, QColor(r_, g_, b_, int(a_ * 0.45)))
+            grad.setColorAt(1.0, QColor(r_, g_, b_, 0))
+            p.setBrush(grad)
+            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
+        # лёгкая вуаль
+        if pal["veil"]:
+            p.fillRect(0, 0, w, h, QColor(255, 255, 255, pal["veil"]))
+        p.end()
+        self._cache = pm
+        self._cache_key = (w, h, self._period)
 
     def paintEvent(self, event) -> None:  # noqa: N802
+        import math
         p = QPainter(self)
         rect = self.rect()
         if theme.is_minimal():
             p.fillRect(rect, QColor(theme.MIN_BG))
             p.end()
             return
-        if self._pix is None:
-            from PySide6.QtGui import QLinearGradient
-            top, bottom = QColor("#DFF1FB"), QColor("#E9F8EC")
-            grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-            grad.setColorAt(0.0, top)
-            grad.setColorAt(1.0, bottom)
-            p.fillRect(rect, grad)
-        else:
-            pw, ph = self._pix.width(), self._pix.height()
-            scale = max(rect.width() / pw, rect.height() / ph)
-            tw, th = int(pw * scale), int(ph * scale)
-            x, y = (rect.width() - tw) // 2, (rect.height() - th) // 2
-            p.drawPixmap(x, y, tw, th, self._pix)
-        # Вуаль тоньше, чем раньше: пузыри и лучи на обоях должны читаться
-        p.fillRect(rect, QColor(255, 255, 255, 34))
+        key = (rect.width(), rect.height(), ambient.period())
+        if self._cache is None or self._cache_key != key:
+            self._period = ambient.period()
+            self._rebuild_cache()
+        p.drawPixmap(0, 0, self._cache)
+        # декоративные пузыри — почти прозрачные, медленно дышат
+        p.setRenderHint(QPainter.Antialiasing)
+        for (fx, fy, r, phase, amp) in self._BUBBLES:
+            x = fx * rect.width()
+            y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
+            paint_bubble_circle(p, QRectF(x - r, y - r, r * 2, r * 2))
         p.end()
 
 
@@ -683,8 +748,18 @@ class MainWindow(QMainWindow):
         self._open_editor(note.id)
 
     def _open_editor(self, note_id: int) -> None:
-        editor = NoteEditor(self.db, note_id, self)
-        editor.exec()
+        # затемняющая вуаль под модальным окном — глубина по брифу
+        overlay = QWidget(self.centralWidget())
+        overlay.setAttribute(Qt.WA_StyledBackground, True)
+        overlay.setStyleSheet("background: rgba(30, 48, 80, 70);")
+        overlay.setGeometry(self.centralWidget().rect())
+        overlay.show()
+        overlay.raise_()
+        try:
+            editor = NoteEditor(self.db, note_id, self)
+            editor.exec()
+        finally:
+            overlay.deleteLater()
         self.refresh()
 
     def _swatch_icon(self, hexcol: str) -> QIcon:
