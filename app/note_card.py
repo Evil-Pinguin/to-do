@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import colors as C
+from . import theme as T
 from .formatting import fmt_short, fmt_deadline
 from .glass import paint_bubble_card
 from .models import Note, TYPE_LIST, TYPE_TASK, PRIORITY_NAMES
@@ -112,9 +113,8 @@ class NoteCard(GlassCard):
 
         self.type_label = QLabel(note.type_name, self)
         self.type_label.setStyleSheet(
-            f"color: {C.TEXT_DARK}; font-size: 10px; font-weight: 700;"
-            "background: rgba(255,255,255,130); border-radius: 7px; padding: 1px 7px;"
-            "border: 1px solid rgba(255,255,255,180);"
+            f"{T.chip_style()} font-size: 10px; font-weight: 700;"
+            "border-radius: 7px; padding: 1px 7px;"
         )
         top.addWidget(self.type_label)
         top.addStretch(1)
@@ -126,7 +126,7 @@ class NoteCard(GlassCard):
         self.menu_btn.setFixedSize(QSize(30, 26))
         self.menu_btn.setStyleSheet(
             "QToolButton { border: none; border-radius: 9px; font-size: 15px;"
-            " font-weight: 700; color: #35506e; padding: 0 2px 3px 2px;"
+            f" font-weight: 700; color: {T.text_primary()}; padding: 0 2px 3px 2px;"
             " background: transparent; }"
             "QToolButton:hover { background: rgba(255,255,255,180); }"
         )
@@ -147,7 +147,7 @@ class NoteCard(GlassCard):
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(44)
         self.title_label.setStyleSheet(
-            f"color: {C.TEXT_DARK}; border: none; background: transparent;"
+            f"color: {T.text_primary()}; border: none; background: transparent;"
         )
         root.addWidget(self.title_label)
 
@@ -156,7 +156,7 @@ class NoteCard(GlassCard):
         self.preview_label.setWordWrap(True)
         self.preview_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.preview_label.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: 12px; border: none;"
+            f"color: {T.text_muted()}; font-size: 12px; border: none;"
             "background: transparent; line-height: 130%;"
         )
         self.preview_label.setTextFormat(Qt.RichText)
@@ -173,20 +173,19 @@ class NoteCard(GlassCard):
         bottom.setSpacing(8)
         self.group_label = QLabel(self)
         self.group_label.setStyleSheet(
-            f"color: {C.TEXT_DARK}; font-size: 10px; font-weight: 700;"
-            "background: rgba(255,255,255,130); border-radius: 8px; padding: 2px 8px;"
-            "border: 1px solid rgba(255,255,255,170);"
+            f"{T.chip_style()} font-size: 10px; font-weight: 700;"
+            "border-radius: 8px; padding: 2px 8px;"
         )
         bottom.addWidget(self.group_label)
         self.img_label = QLabel(self)
         self.img_label.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: 10px; border: none; background: transparent;"
+            f"color: {T.text_muted()}; font-size: 10px; border: none; background: transparent;"
         )
         bottom.addWidget(self.img_label)
         bottom.addStretch(1)
         self.date_label = QLabel(self)
         self.date_label.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: 10px; border: none; background: transparent;"
+            f"color: {T.text_muted()}; font-size: 10px; border: none; background: transparent;"
         )
         bottom.addWidget(self.date_label)
         root.addLayout(bottom)
@@ -229,13 +228,14 @@ class NoteCard(GlassCard):
         n = self.note
 
         if n.type == TYPE_LIST:
+            gray = "rgba(255,255,255,120)" if T.is_frosted() else "#8aa0b4"
             lines = []
             for it in n.list_items()[:7]:
                 mark = "☑" if it.done else "☐"
                 txt = html.escape(it.text or "…")
                 if it.done:
                     lines.append(
-                        f'<span style="color:#8aa0b4; text-decoration: line-through;">'
+                        f'<span style="color:{gray}; text-decoration: line-through;">'
                         f"{mark} {txt}</span>"
                     )
                 else:
@@ -245,10 +245,11 @@ class NoteCard(GlassCard):
         if n.type == TYPE_TASK:
             parts = []
             if n.done:
-                parts.append('<b style="color:#3e9e63;">✓ Выполнено</b>')
+                done_col = "#5EE8A9" if T.is_frosted() else "#3e9e63"
+                parts.append(f'<b style="color:{done_col};">✓ Выполнено</b>')
             elif n.deadline:
                 dl_txt = f"До: {fmt_deadline(n.deadline)}"
-                col = "#d25454" if n.is_overdue() else C.TEXT_DARK
+                col = "#FF9B9B" if (n.is_overdue() and T.is_frosted()) else ("#d25454" if n.is_overdue() else T.text_primary())
                 parts.append(f'<b style="color:{col};">{html.escape(dl_txt)}</b>')
             if n.priority:
                 pcol = C.PRIORITY_COLORS.get(n.priority, ("", "#888"))[1]

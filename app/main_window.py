@@ -129,6 +129,16 @@ class BackgroundWidget(QWidget):
             p.fillRect(rect, QColor(theme.MIN_BG))
             p.end()
             return
+        if theme.is_frosted():
+            self._paint_frosted_bg(p, rect)
+            # пузыри рисуем и здесь — frosted-ветка painter'а сама разберётся
+            p.setRenderHint(QPainter.Antialiasing)
+            for (fx, fy, r, phase, amp) in self._BUBBLES:
+                x = fx * rect.width()
+                y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
+                paint_bubble_circle(p, QRectF(x - r, y - r, r * 2, r * 2))
+            p.end()
+            return
         key = (rect.width(), rect.height(), ambient.period())
         if self._cache is None or self._cache_key != key:
             self._period = ambient.period()
@@ -141,6 +151,31 @@ class BackgroundWidget(QWidget):
             y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
             paint_bubble_circle(p, QRectF(x - r, y - r, r * 2, r * 2))
         p.end()
+
+    def _paint_frosted_bg(self, p: QPainter, rect) -> None:
+        """Глубокий сине-фиолетовый градиент + яркие мягкие свечения."""
+        w, h = rect.width(), rect.height()
+        grad = QLinearGradient(0, 0, w, h)   # диагональ, как 135deg
+        grad.setColorAt(0.0, QColor(theme.FR_BG_TOP))
+        grad.setColorAt(1.0, QColor(theme.FR_BG_BOTTOM))
+        p.fillRect(rect, grad)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        blobs = [
+            (59, 130, 246, 80, 0.12, 0.06, 0.55),    # голубое свечение сверху
+            (236, 72, 153, 55, 0.88, 0.30, 0.50),    # розовое справа
+            (255, 255, 255, 30, 0.50, 0.55, 0.60),   # белое в центре
+            (124, 58, 237, 70, 0.25, 0.95, 0.55),    # фиолет снизу
+        ]
+        for (r_, g_, b_, a_, fx, fy, fr) in blobs:
+            rad = fr * max(w, h)
+            cx, cy = fx * w, fy * h
+            g = QRadialGradient(cx, cy, rad)
+            g.setColorAt(0.0, QColor(r_, g_, b_, a_))
+            g.setColorAt(0.6, QColor(r_, g_, b_, int(a_ * 0.4)))
+            g.setColorAt(1.0, QColor(r_, g_, b_, 0))
+            p.setBrush(g)
+            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +446,8 @@ class MainWindow(QMainWindow):
         for k, act in self._theme_actions.items():
             act.setChecked(k == key)
         self._apply_style()
+        # пересоздать карточки — их стили (цвет текста) зависят от темы
+        self.refresh()
         # перерисовать всё, что рисуется вручную
         self.bg.update()
         self.top_bar.update()
@@ -876,6 +913,20 @@ class MainWindow(QMainWindow):
                     height: 1px; background: {theme.MIN_HAIRLINE}; margin: 5px 10px;
                 }}
             """
+        if theme.is_frosted():
+            return """
+                QMenu {
+                    background: rgba(42,52,96,242);
+                    border: 1px solid rgba(255,255,255,55);
+                    border-radius: 14px; padding: 6px;
+                    font-size: 13px; color: #FFFFFF;
+                }
+                QMenu::item { padding: 6px 26px 6px 14px; border-radius: 9px; }
+                QMenu::item:selected { background: rgba(59,130,246,150); }
+                QMenu::separator {
+                    height: 1px; background: rgba(255,255,255,45); margin: 5px 10px;
+                }
+            """
         return """
             QMenu {
                 background: rgba(240,250,255,235);
@@ -893,6 +944,9 @@ class MainWindow(QMainWindow):
     def _apply_style(self) -> None:
         if theme.is_minimal():
             self._apply_minimal_style()
+            return
+        if theme.is_frosted():
+            self._apply_frosted_style()
             return
         self.setStyleSheet(f"""
             MainWindow, BackgroundWidget {{ background: #E4F2FB; }}
@@ -1014,6 +1068,132 @@ class MainWindow(QMainWindow):
             }}
             QScrollBar::handle:horizontal {{
                 background: rgba(90,140,190,130); border-radius: 5px; min-width: 40px;
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+            {self._menu_qss()}
+        """)
+
+    def _apply_frosted_style(self) -> None:
+        """Frosted glassmorphism: тёмный сине-фиолетовый фон, молочное стекло,
+        белый текст, яркие акценты."""
+        A = theme.FR_ACCENT
+        self.setStyleSheet(f"""
+            MainWindow, BackgroundWidget {{ background: {theme.FR_BG_TOP}; }}
+            GlassPanel {{ background: transparent; border: none; }}
+
+            QLabel#brandLabel {{
+                color: #FFFFFF; font-size: 14px; font-weight: 800;
+                background: rgba(255,255,255,38); border-radius: 12px;
+                padding: 5px 14px;
+                border: 1px solid rgba(255,255,255,60);
+            }}
+            QLabel#clockLabel {{
+                color: rgba(255,255,255,225); font-size: 12px; font-weight: 600;
+                background: rgba(255,255,255,32); border-radius: 12px;
+                padding: 6px 12px;
+                border: 1px solid rgba(255,255,255,55);
+            }}
+            QLabel#countLabel {{ color: rgba(255,255,255,165); font-size: 11px; padding: 0 6px; background: transparent; }}
+            QLabel#emptyLabel {{ color: rgba(255,255,255,200); font-size: 15px; background: transparent; }}
+
+            QLineEdit {{
+                background: rgba(255,255,255,38);
+                border: 1px solid rgba(255,255,255,60);
+                border-radius: 16px; padding: 7px 14px;
+                font-size: 12px; color: #FFFFFF;
+                selection-background-color: rgba(59,130,246,190);
+            }}
+            QLineEdit:focus {{
+                background: rgba(255,255,255,55);
+                border: 1.5px solid rgba(96,165,250,220);
+            }}
+            QComboBox {{
+                background: rgba(255,255,255,38);
+                border: 1px solid rgba(255,255,255,60);
+                border-radius: 14px; padding: 6px 12px;
+                font-size: 12px; color: #FFFFFF;
+            }}
+            QComboBox:hover {{ background: rgba(255,255,255,60); }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox QAbstractItemView {{
+                background: rgba(42,52,96,245);
+                border: 1px solid rgba(255,255,255,55);
+                border-radius: 12px; color: #FFFFFF;
+                selection-background-color: rgba(59,130,246,160);
+                outline: none; padding: 4px;
+            }}
+            QToolButton {{
+                background: rgba(255,255,255,38);
+                border: 1px solid rgba(255,255,255,60);
+                border-radius: 14px; padding: 6px 12px;
+                font-size: 12px; color: #FFFFFF;
+            }}
+            QToolButton:hover {{ background: rgba(255,255,255,70); }}
+            QToolButton::menu-indicator {{ image: none; }}
+            QToolButton#newButton {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba(96,165,250,235), stop:1 rgba(59,130,246,235));
+                color: white; font-weight: 700;
+                border: 1px solid rgba(255,255,255,120);
+            }}
+            QToolButton#newButton:hover {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba(125,185,255,245), stop:1 rgba(80,145,250,245));
+            }}
+            QToolButton#pinFab {{
+                background: rgba(255,255,255,50);
+                border: 1px solid rgba(255,255,255,80);
+                border-radius: 15px; padding: 0; font-size: 13px;
+            }}
+            QToolButton#pinFab:checked {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba(96,165,250,235), stop:1 rgba(59,130,246,235));
+                border: 1px solid rgba(255,255,255,140);
+            }}
+            QPushButton {{
+                background: rgba(255,255,255,38);
+                border: 1px solid rgba(255,255,255,60);
+                border-radius: 14px; padding: 6px 14px;
+                font-size: 12px; color: #FFFFFF;
+            }}
+            QPushButton:hover {{ background: rgba(255,255,255,70); }}
+            QPushButton:checked {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba(96,165,250,235), stop:1 rgba(59,130,246,235));
+                color: white; font-weight: 600;
+                border: 1px solid rgba(255,255,255,120);
+            }}
+
+            GlassPanel QCheckBox {{
+                color: rgba(255,255,255,230); font-size: 12px; spacing: 7px;
+                background: transparent;
+            }}
+            GlassPanel QCheckBox::indicator {{
+                width: 15px; height: 15px; border-radius: 4px;
+                background: rgba(255,255,255,45);
+                border: 1px solid rgba(255,255,255,90);
+            }}
+            GlassPanel QCheckBox::indicator:checked {{
+                background: {A};
+                border: 1px solid rgba(255,255,255,150);
+            }}
+
+            QScrollArea {{ background: transparent; border: none; }}
+            QWidget#board {{ background: transparent; }}
+            QScrollBar:vertical {{
+                background: rgba(255,255,255,26); width: 10px;
+                border-radius: 5px; margin: 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255,255,255,100); border-radius: 5px; min-height: 40px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar:horizontal {{
+                background: rgba(255,255,255,26); height: 10px;
+                border-radius: 5px; margin: 2px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: rgba(255,255,255,100); border-radius: 5px; min-width: 40px;
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
             {self._menu_qss()}

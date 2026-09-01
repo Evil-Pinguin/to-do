@@ -15,8 +15,8 @@ from typing import List, Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen,
-    QPixmap, QPolygonF,
+    QColor, QCursor, QFont, QFontMetrics, QLinearGradient, QPainter,
+    QPainterPath, QPen, QPixmap, QPolygonF,
 )
 from PySide6.QtWidgets import (
     QFrame, QMainWindow, QMenu, QScrollArea, QWidget,
@@ -92,8 +92,15 @@ class SandboxCard(QFrame):
         )
 
         minimal = theme.is_minimal()
-        dark = QColor(theme.MIN_TEXT) if minimal else QColor(C.TEXT_DARK)
-        muted = QColor(theme.MIN_MUTED) if minimal else QColor(C.TEXT_MUTED)
+        if theme.is_frosted():
+            dark = QColor(theme.text_primary())
+            muted = QColor(255, 255, 255, 180)
+        elif minimal:
+            dark = QColor(theme.MIN_TEXT)
+            muted = QColor(theme.MIN_MUTED)
+        else:
+            dark = QColor(C.TEXT_DARK)
+            muted = QColor(C.TEXT_MUTED)
 
         pad = 16
         f = QFont(self.font())
@@ -286,13 +293,20 @@ class SandboxCanvas(QWidget):
     def _link_pen(self) -> QPen:
         if theme.is_minimal():
             return QPen(QColor(theme.MIN_MUTED), 2.0, Qt.SolidLine, Qt.RoundCap)
+        if theme.is_frosted():
+            return QPen(QColor(255, 255, 255, 170), 2.2, Qt.SolidLine, Qt.RoundCap)
         return QPen(QColor(90, 140, 190, 200), 2.4, Qt.SolidLine, Qt.RoundCap)
 
     # -- отрисовка ----------------------------------------------------------
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         rect = self.rect()
-        if theme.is_minimal() or self._pix is None:
+        if theme.is_frosted():
+            grad = QLinearGradient(0, 0, rect.width(), rect.height())
+            grad.setColorAt(0.0, QColor(theme.FR_BG_TOP))
+            grad.setColorAt(1.0, QColor(theme.FR_BG_BOTTOM))
+            p.fillRect(rect, grad)
+        elif theme.is_minimal() or self._pix is None:
             p.fillRect(rect, QColor(theme.MIN_BG if theme.is_minimal() else "#E4F2FB"))
         else:
             pw, ph = self._pix.width(), self._pix.height()

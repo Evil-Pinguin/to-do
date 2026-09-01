@@ -195,8 +195,14 @@ class NoteEditor(QDialog):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        # подложка — оттенок неба с обоев (в минимализме — светло-серый Apple)
-        bg = theme.MIN_BG if theme.is_minimal() else "#DDF2F8"
+        # подложка — оттенок неба с обоев (в минимализме — светло-серый Apple,
+        # во frosted — глубокий сине-фиолетовый)
+        if theme.is_minimal():
+            bg = theme.MIN_BG
+        elif theme.is_frosted():
+            bg = "#3A3F8F"
+        else:
+            bg = "#DDF2F8"
         p.fillRect(self.rect(), QColor(bg))
         rect = QRectF(self.rect()).adjusted(3.5, 3.5, -3.5, -3.5)
         paint_bubble_glass(
