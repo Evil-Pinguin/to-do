@@ -1,0 +1,13 @@
+# Локальные данные приложения (база SQLite) — не храним в git
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Сборка
+build/
+dist/
+*.spec
