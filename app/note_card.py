@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from . import colors as C
 from .formatting import fmt_short, fmt_deadline
-from .glass import paint_bubble_glass
+from .glass import paint_bubble_card
 from .models import Note, TYPE_LIST, TYPE_TASK, PRIORITY_NAMES
 
 PREVIEW_CHARS = 420
@@ -38,12 +38,11 @@ class GlassCard(QFrame):
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        # Стиль «мыльного пузыря» с обоев: прозрачное тело, рим-кромка,
-        # блик-полумесяц + искра, цветной рефлекс снизу (см. app/glass.py).
-        paint_bubble_glass(
+        # Карточка = прямоугольный мыльный пузырь: прозрачный центр-линза,
+        # цветная «плёнка» по краям, полумесяц + искра (см. app/glass.py).
+        paint_bubble_card(
             p, rect, 16.0,
             base_rgb=C.base_rgb(self._color_key),
-            body_alpha=120,
             hover=self.underMouse(),
         )
         p.end()

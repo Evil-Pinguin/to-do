@@ -145,6 +145,106 @@ def paint_bubble_glass(
     p.drawPath(path)
 
 
+def paint_bubble_card(
+    p: QPainter,
+    rect: QRectF,
+    radius: float,
+    base_rgb: tuple[int, int, int],
+    hover: bool = False,
+) -> None:
+    """Прямоугольный «мыльный пузырь» — как paint_bubble_circle, но для карточек.
+
+    Центр почти прозрачный (линза), цвет заметки сконцентрирован у краёв,
+    как плёнка пузыря; рим, полумесяц, искра и цветной рефлекс — те же.
+    """
+    p.setRenderHint(QPainter.Antialiasing)
+
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    r_, g_, b_ = base_rgb
+
+    # ---- 1. Центр: лёгкая дымка (читаемость текста) + едва заметный тон ----
+    haze = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+    haze.setColorAt(0.0, QColor(255, 255, 255, 60))
+    haze.setColorAt(0.5, QColor(255, 255, 255, 44))
+    haze.setColorAt(1.0, QColor(255, 255, 255, 56))
+    p.fillPath(path, haze)
+    p.fillPath(path, QColor(r_, g_, b_, 34))
+
+    p.save()
+    p.setClipPath(path)
+
+    # ---- 2. Цветная «плёнка» — цвет сгущается к краям, центр прозрачный ----
+    for width, alpha in ((radius * 2.6, 30), (radius * 1.5, 42), (radius * 0.7, 58)):
+        p.setPen(QPen(QColor(r_, g_, b_, alpha), width))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+
+    # ---- 3. Рим-кромка (холодное кольцо преломления) ------------------------
+    rim = _mix(base_rgb, _RIM_COOL, 0.60)
+    for width, alpha in ((6.5, 34), (3.8, 48), (1.8, 66)):
+        p.setPen(QPen(QColor(rim[0], rim[1], rim[2], alpha), width))
+        p.drawPath(path)
+
+    # ---- 4. Диагональный луч света ------------------------------------------
+    sheen = QLinearGradient(rect.topRight(), rect.bottomLeft())
+    sheen.setColorAt(0.00, QColor(255, 255, 255, 0))
+    sheen.setColorAt(0.40, QColor(255, 255, 255, 0))
+    sheen.setColorAt(0.50, QColor(255, 255, 255, 30))
+    sheen.setColorAt(0.60, QColor(255, 255, 255, 0))
+    sheen.setColorAt(1.00, QColor(255, 255, 255, 0))
+    p.fillPath(path, sheen)
+
+    # ---- 5. Блик-полумесяц вдоль верхней дуги --------------------------------
+    ew = rect.width() * 1.25
+    eh = rect.height() * 0.60
+    crescent = QPainterPath()
+    crescent.addEllipse(QRectF(rect.x() - ew * 0.14, rect.y() - eh * 0.42, ew, eh))
+    crescent = crescent.intersected(path)
+    shine = QLinearGradient(rect.topLeft(), QPointF(rect.x(), rect.y() + eh * 0.58))
+    shine.setColorAt(0.0, QColor(255, 255, 255, 170))
+    shine.setColorAt(0.55, QColor(255, 255, 255, 58))
+    shine.setColorAt(1.0, QColor(255, 255, 255, 0))
+    p.fillPath(crescent, shine)
+
+    # ---- 6. Искра с крестовым глинтом ----------------------------------------
+    cx = rect.x() + radius * 1.2
+    cy = rect.y() + radius * 1.05
+    srad = min(max(7.0, min(rect.width(), rect.height()) * 0.075), 14.0)
+    p.setPen(Qt.NoPen)
+    halo = QRadialGradient(QPointF(cx, cy), srad * 2.3)
+    halo.setColorAt(0.0, QColor(255, 255, 255, 185))
+    halo.setColorAt(0.5, QColor(255, 255, 255, 62))
+    halo.setColorAt(1.0, QColor(255, 255, 255, 0))
+    p.setBrush(halo)
+    p.drawEllipse(QPointF(cx, cy), srad * 2.3, srad * 2.3)
+    for w, h in ((srad * 3.5, srad * 0.5), (srad * 0.5, srad * 3.5)):
+        g = QRadialGradient(QPointF(cx, cy), max(w, h) / 2)
+        g.setColorAt(0.0, QColor(255, 255, 255, 205))
+        g.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(g)
+        p.drawEllipse(QPointF(cx, cy), w / 2, h / 2)
+
+    # ---- 7. Нижний цветной рефлекс -------------------------------------------
+    env = _mix(_ENV_REFLEX, base_rgb, 0.30)
+    ref_h = rect.height() * 0.26
+    ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
+    ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
+    ref.setColorAt(0.0, QColor(env[0], env[1], env[2], 0))
+    ref.setColorAt(1.0, QColor(env[0], env[1], env[2], 88))
+    p.fillPath(path, ref)
+
+    if hover:
+        p.fillPath(path, QColor(255, 255, 255, 26))
+
+    p.restore()
+
+    # ---- 8. Внешний контур -----------------------------------------------------
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(QColor(255, 255, 255, 185), 1.1))
+    p.drawPath(path)
+
+
 def paint_bubble_circle(
     p: QPainter,
     rect: QRectF,

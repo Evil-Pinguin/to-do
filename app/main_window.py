@@ -127,6 +127,12 @@ class BubbleButton(QToolButton):
         shadow.setColor(QColor(70, 120, 160, 70))
         self.setGraphicsEffect(shadow)
 
+    def set_compact(self, on: bool) -> None:
+        """В режиме-виджете пузырь поменьше, чтобы не загораживал список."""
+        s = 52 if on else self.SIZE
+        self.setFixedSize(QSize(s, s))
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         rect = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
@@ -166,22 +172,26 @@ class MainWindow(QMainWindow):
         self.db = db
         self.setWindowTitle("Aero Notes — заметки и задачи")
         self.resize(1340, 850)
-        self.setMinimumSize(1020, 660)
+        # Минимум маленький: окно можно сжать в «виджет» со списком заметок
+        self.setMinimumSize(320, 380)
 
         self._cards: List[NoteCard] = []
         self._cols = 0
         self.sort_desc = True
+        self._compact = False
 
         central = QWidget()
         self.setCentralWidget(central)
         outer = QVBoxLayout(central)
         outer.setContentsMargins(14, 10, 14, 12)
         outer.setSpacing(10)
+        self._outer_lay = outer
 
         self.bg = BackgroundWidget(central)
         self.bg.lower()
 
-        outer.addWidget(self._build_top_bar())
+        self.top_bar = self._build_top_bar()
+        outer.addWidget(self.top_bar)
         body = QHBoxLayout()
         body.setSpacing(10)
         outer.addLayout(body, 1)
@@ -215,14 +225,31 @@ class MainWindow(QMainWindow):
         # в углу — их размер layout'ом не управляется).
         central = self.centralWidget()
         self.bg.setGeometry(central.rect())
+        self._update_compact_mode()
         # Кнопка-пузырь — в правом нижнем углу поверх всего
-        m = 26
+        m = 14 if self._compact else 26
         self.fab.move(
             central.width() - self.fab.width() - m,
             central.height() - self.fab.height() - m,
         )
         self.fab.raise_()
         super().resizeEvent(event)
+
+    def _update_compact_mode(self) -> None:
+        """Режим-виджет: в маленьком окне остаётся только список заметок."""
+        compact = self.width() < 720 or self.height() < 520
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self.top_bar.setVisible(not compact)
+        self.filter_panel.setVisible(not compact and self.filter_btn.isChecked())
+        if compact:
+            self._outer_lay.setContentsMargins(6, 6, 6, 6)
+            self.fab.set_compact(True)
+        else:
+            self._outer_lay.setContentsMargins(14, 10, 14, 12)
+            self.fab.set_compact(False)
+        self._relayout(force=True)
 
     # ==================================================================
     #  Верхняя панель
@@ -439,7 +466,7 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _toggle_filter_panel(self, on: bool) -> None:
-        self.filter_panel.setVisible(on)
+        self.filter_panel.setVisible(on and not self._compact)
 
     # ==================================================================
     #  Доска с карточками
@@ -548,8 +575,12 @@ class MainWindow(QMainWindow):
                 w.setParent(None)
 
     def _relayout(self, force: bool = False) -> None:
-        vw = max(self.scroll.viewport().width() - 12, 240)
-        cols = max(2, min(6, vw // 300))
+        vw = max(self.scroll.viewport().width() - 12, 160)
+        # В компактном режиме-виджете — одна колонка, как список
+        if self._compact:
+            cols = 1 if vw < 560 else 2
+        else:
+            cols = max(1, min(6, vw // 300))
         if cols == self._cols and not force:
             return
         self._cols = cols

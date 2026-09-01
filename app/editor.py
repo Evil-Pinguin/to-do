@@ -313,18 +313,31 @@ class NoteEditor(QDialog):
         v.setSpacing(4)
 
         head = QHBoxLayout()
-        cap = QLabel("Изображения", group)
-        cap.setStyleSheet(
-            f"color: {C.TEXT_DARK}; font-size: 11px; font-weight: 700;"
+        self.img_toggle = QToolButton(group)
+        self.img_toggle.setCheckable(True)
+        self.img_toggle.setChecked(False)          # по умолчанию свёрнуто
+        self.img_toggle.setCursor(Qt.PointingHandCursor)
+        self.img_toggle.setStyleSheet(
+            "QToolButton { border: none; background: transparent;"
+            f" color: {C.TEXT_DARK}; font-size: 11px; font-weight: 700;"
+            " padding: 2px 6px; border-radius: 8px; }"
+            "QToolButton:hover { background: rgba(255,255,255,150); }"
         )
-        head.addWidget(cap)
-        hint = QLabel("Ctrl+Shift+V — вставить картинку из буфера", group)
-        hint.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 10px;")
+        self.img_toggle.toggled.connect(self._toggle_images)
+        head.addWidget(self.img_toggle)
+        self.img_hint = QLabel("Ctrl+Shift+V — вставить картинку из буфера", group)
+        self.img_hint.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 10px;")
+        self.img_hint.setVisible(False)
         head.addStretch(1)
-        head.addWidget(hint)
+        head.addWidget(self.img_hint)
         v.addLayout(head)
 
-        area = QScrollArea(group)
+        self.img_body = QWidget(group)
+        bv = QVBoxLayout(self.img_body)
+        bv.setContentsMargins(0, 0, 0, 0)
+        bv.setSpacing(0)
+
+        area = QScrollArea(self.img_body)
         area.setFixedHeight(116)
         area.setWidgetResizable(True)
         area.setFrameShape(QFrame.NoFrame)
@@ -338,11 +351,26 @@ class NoteEditor(QDialog):
         self.images_lay.setSpacing(8)
         self.images_lay.addStretch(1)
         area.setWidget(holder)
-        v.addWidget(area)
+        bv.addWidget(area)
+
+        self.img_body.setVisible(False)            # свёрнуто по умолчанию
+
+        v.addWidget(self.img_body)
 
         QShortcut(QKeySequence("Ctrl+Shift+V"), self, self._paste_image)
         self._rebuild_images()
         return group
+
+    def _toggle_images(self, on: bool) -> None:
+        self.img_body.setVisible(on)
+        self.img_hint.setVisible(on)
+        self._update_images_caption()
+
+    def _update_images_caption(self) -> None:
+        n = len(self._image_rows)
+        arrow = "▾" if self.img_toggle.isChecked() else "▸"
+        cnt = f" ({n})" if n else ""
+        self.img_toggle.setText(f"{arrow} Изображения{cnt}")
 
     # ==================================================================
     #  Список
@@ -394,6 +422,7 @@ class NoteEditor(QDialog):
     #  Картинки
     # ==================================================================
     def _rebuild_images(self) -> None:
+        self._update_images_caption()
         while self.images_lay.count() > 1:
             item = self.images_lay.takeAt(0)
             if item.widget():
@@ -464,6 +493,9 @@ class NoteEditor(QDialog):
         blob = compress_image(data)
         img_id = self.db.add_image(self.note.id, blob)
         self._image_rows.append((img_id, blob))
+        # при добавлении картинки раскрываем блок, чтобы её было видно
+        if not self.img_toggle.isChecked():
+            self.img_toggle.setChecked(True)
         self._rebuild_images()
         self._touch("image_added")
 
