@@ -63,6 +63,7 @@ class GlassCard(QFrame):
             base_rgb=C.base_rgb(self._color_key),
             hover=hovered,
             glow_pos=glow,
+            widget=self,
         )
         p.end()
 
@@ -91,9 +92,15 @@ class NoteCard(GlassCard):
         self.setCursor(Qt.PointingHandCursor)
 
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 7)
-        shadow.setColor(QColor(30, 70, 130, 90))
+        if T.is_frosted():
+            # frosted: карточка «парит» — тень глубже и мягче
+            shadow.setBlurRadius(36)
+            shadow.setOffset(0, 10)
+            shadow.setColor(QColor(0, 0, 25, 110))
+        else:
+            shadow.setBlurRadius(28)
+            shadow.setOffset(0, 7)
+            shadow.setColor(QColor(30, 70, 130, 90))
         self.setGraphicsEffect(shadow)
 
         root = QVBoxLayout(self)

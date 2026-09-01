@@ -89,6 +89,7 @@ class SandboxCard(QFrame):
             p, rect, 14.0,
             base_rgb=C.base_rgb(self.note.color),
             hover=self._hover,
+            widget=self,
         )
 
         minimal = theme.is_minimal()
@@ -290,6 +291,47 @@ class SandboxCanvas(QWidget):
                     best = (d, pa, pb)
         return best[1], best[2]
 
+    _fr_cache = None
+    _fr_blur = None
+    _fr_key: tuple = ()
+
+    def _ensure_frosted_cache(self) -> None:
+        """Живой фон песочницы + его размытая версия для стекла карточек."""
+        w, h = max(1, self.width()), max(1, self.height())
+        if self._fr_cache is not None and self._fr_key == (w, h):
+            return
+        pm = QPixmap(w, h)
+        p = QPainter(pm)
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0, QColor("#1B2B5E"))
+        grad.setColorAt(1.0, QColor("#4C2589"))
+        p.fillRect(0, 0, w, h, grad)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        from PySide6.QtGui import QRadialGradient
+        blobs = [
+            (34, 211, 238, 95, 0.20, 0.12, 0.40),
+            (236, 72, 153, 85, 0.85, 0.35, 0.38),
+            (139, 92, 246, 105, 0.40, 0.85, 0.45),
+        ]
+        for (r_, g_, b_, a_, fx, fy, fr) in blobs:
+            rad = fr * max(w, h)
+            cx, cy = fx * w, fy * h
+            g = QRadialGradient(cx, cy, rad)
+            g.setColorAt(0.0, QColor(r_, g_, b_, a_))
+            g.setColorAt(1.0, QColor(r_, g_, b_, 0))
+            p.setBrush(g)
+            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
+        p.end()
+        self._fr_cache = pm
+        from .glass import blur_pixmap
+        self._fr_blur = blur_pixmap(pm, 14)
+        self._fr_key = (w, h)
+
+    def frosted_blur(self):
+        self._ensure_frosted_cache()
+        return self._fr_blur
+
     def _link_pen(self) -> QPen:
         if theme.is_minimal():
             return QPen(QColor(theme.MIN_MUTED), 2.0, Qt.SolidLine, Qt.RoundCap)
@@ -302,10 +344,8 @@ class SandboxCanvas(QWidget):
         p = QPainter(self)
         rect = self.rect()
         if theme.is_frosted():
-            grad = QLinearGradient(0, 0, rect.width(), rect.height())
-            grad.setColorAt(0.0, QColor(theme.FR_BG_TOP))
-            grad.setColorAt(1.0, QColor(theme.FR_BG_BOTTOM))
-            p.fillRect(rect, grad)
+            self._ensure_frosted_cache()
+            p.drawPixmap(0, 0, self._fr_cache)
         elif theme.is_minimal() or self._pix is None:
             p.fillRect(rect, QColor(theme.MIN_BG if theme.is_minimal() else "#E4F2FB"))
         else:
@@ -441,6 +481,16 @@ class SandboxWindow(QMainWindow):
             self.setStyleSheet(self.main_window.styleSheet())
 
         self._load()
+
+    def frosted_backdrop(self):
+        """Размытый фон холста для стеклянных карточек (Liquid Glass)."""
+        if not theme.is_frosted():
+            return None
+        pm = self.canvas.frosted_blur()
+        if pm is None:
+            return None
+        from PySide6.QtCore import QPoint
+        return pm, self.canvas.mapTo(self, QPoint(0, 0))
 
     def menu_qss(self) -> str:
         if self.main_window is not None:

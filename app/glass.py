@@ -14,15 +14,83 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
+    QBrush, QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen,
+    QPixmap, QRadialGradient,
 )
 
 from . import ambient, theme
 
 # Оттенок окружения для нижнего рефлекса (по умолчанию; живой берём из ambient).
 _ENV_REFLEX = (191, 231, 226)
+
+# ----------------------------------------------------------------------------
+#  Frosted: шум и «честный» backdrop-blur
+# ----------------------------------------------------------------------------
+_NOISE_TILE: QPixmap | None = None
+
+
+def _noise_tile() -> QPixmap:
+    """Мелкий полупрозрачный шум — убирает «пластиковость» стекла."""
+    global _NOISE_TILE
+    if _NOISE_TILE is None:
+        import random
+        rnd = random.Random(42)
+        img = QImage(96, 96, QImage.Format_ARGB32)
+        img.fill(0)
+        for y in range(96):
+            for x in range(96):
+                v = rnd.randint(0, 255)
+                if v > 128:
+                    img.setPixelColor(x, y, QColor(255, 255, 255, (v - 128) // 11))
+                else:
+                    img.setPixelColor(x, y, QColor(0, 0, 30, (128 - v) // 13))
+        _NOISE_TILE = QPixmap.fromImage(img)
+    return _NOISE_TILE
+
+
+def draw_frosted_backdrop(p: QPainter, path: QPainterPath, widget) -> bool:
+    """Подложить под стекло размытый кусок фона (аналог backdrop-filter).
+
+    Окно виджета должно реализовать ``frosted_backdrop() -> (QPixmap, QPoint)``
+    — размытый снимок фона и его начало в координатах окна.
+    """
+    if widget is None:
+        return False
+    win = widget.window()
+    fn = getattr(win, "frosted_backdrop", None)
+    if fn is None:
+        return False
+    try:
+        res = fn()
+    except Exception:
+        return False
+    if not res:
+        return False
+    pm, origin = res
+    if pm is None or pm.isNull():
+        return False
+    off = widget.mapTo(win, QPoint(0, 0)) - origin
+    p.save()
+    p.setClipPath(path)
+    p.drawPixmap(-off.x(), -off.y(), pm)
+    p.restore()
+    return True
+
+
+def blur_pixmap(src: QPixmap, strength: int = 14) -> QPixmap:
+    """Дешёвый сильный blur: уменьшить → увеличить с smooth-фильтрацией."""
+    if src.isNull():
+        return src
+    w = max(1, src.width() // strength)
+    h = max(1, src.height() // strength)
+    small = src.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    # двойной проход даёт более гладкий результат
+    small = small.scaled(max(1, w * 2), max(1, h * 2),
+                         Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    return small.scaled(src.width(), src.height(),
+                        Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 # Холодный тон кромки-линзы (взят с края пузыря: #BDE4EB, чуть темнее).
 _RIM_COOL = (125, 170, 195)
 
@@ -67,50 +135,62 @@ def _paint_frosted_rect(
     milk: int = 52,
     hover: bool = False,
     glow_pos: "QPointF | None" = None,
+    widget=None,
 ) -> None:
-    """Матовое «замороженное» стекло (glassmorphism, тёмный фон).
+    """Liquid Glass: размытый фон под стеклом + тонкий светлый слой,
+    спекулярный блик, шум и светящаяся кромка.
 
-    Молочная полупрозрачная плашка + тонкая светлая обводка + верхний
-    внутренний блик; лёгкий цветной оттенок заметки.
+    Если окно предоставляет размытый фон (см. draw_frosted_backdrop),
+    тело стекла почти прозрачное; иначе — плотный молочный fallback.
     """
     path = QPainterPath()
     path.addRoundedRect(rect, radius, radius)
 
-    # молочное тело (имитация backdrop-blur на гладком градиентном фоне)
-    body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-    body.setColorAt(0.0, QColor(255, 255, 255, milk + 14))
-    body.setColorAt(1.0, QColor(255, 255, 255, milk))
-    p.fillPath(path, body)
+    has_backdrop = draw_frosted_backdrop(p, path, widget)
+    if has_backdrop:
+        # тонкий слой стекла: 25% → 8% как в референсе
+        body = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        body.setColorAt(0.0, QColor(255, 255, 255, 64))
+        body.setColorAt(1.0, QColor(255, 255, 255, 20))
+        p.fillPath(path, body)
+    else:
+        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        body.setColorAt(0.0, QColor(255, 255, 255, milk + 14))
+        body.setColorAt(1.0, QColor(255, 255, 255, milk))
+        p.fillPath(path, body)
     if tint_rgb is not None:
-        p.fillPath(path, QColor(tint_rgb[0], tint_rgb[1], tint_rgb[2], 30))
+        p.fillPath(path, QColor(tint_rgb[0], tint_rgb[1], tint_rgb[2], 26))
 
     p.save()
     p.setClipPath(path)
-    # верхний внутренний блик — inset 0 1px 0 rgba(255,255,255,.75)
-    hl = QLinearGradient(rect.topLeft(), QPointF(rect.x(), rect.y() + rect.height() * 0.30))
-    hl.setColorAt(0.0, QColor(255, 255, 255, 90))
-    hl.setColorAt(1.0, QColor(255, 255, 255, 0))
-    p.fillPath(path, hl)
-    # мягкий диагональный отсвет
-    sheen = QLinearGradient(rect.topRight(), rect.bottomLeft())
-    sheen.setColorAt(0.00, QColor(255, 255, 255, 0))
-    sheen.setColorAt(0.45, QColor(255, 255, 255, 0))
-    sheen.setColorAt(0.52, QColor(255, 255, 255, 18))
-    sheen.setColorAt(0.60, QColor(255, 255, 255, 0))
-    sheen.setColorAt(1.00, QColor(255, 255, 255, 0))
-    p.fillPath(path, sheen)
+    # спекулярный блик: яркий из левого-верхнего угла, слабый в правом-нижнем
+    spec = QLinearGradient(rect.topLeft(), rect.bottomRight())
+    spec.setColorAt(0.00, QColor(255, 255, 255, 88))
+    spec.setColorAt(0.30, QColor(255, 255, 255, 0))
+    spec.setColorAt(0.70, QColor(255, 255, 255, 0))
+    spec.setColorAt(1.00, QColor(255, 255, 255, 30))
+    p.fillPath(path, spec)
+    # верхняя внутренняя световая нить (inset 0 1px)
+    p.setPen(QPen(QColor(255, 255, 255, 120), 1.0))
+    p.drawLine(QPointF(rect.x() + radius * 0.7, rect.y() + 1.0),
+               QPointF(rect.right() - radius * 0.7, rect.y() + 1.0))
+    p.setPen(Qt.NoPen)
+    # лёгкий шум — стекло, а не пластик
+    p.setOpacity(0.55)
+    p.fillPath(path, QBrush(_noise_tile()))
+    p.setOpacity(1.0)
     if hover:
-        p.fillPath(path, QColor(255, 255, 255, 18))
+        p.fillPath(path, QColor(255, 255, 255, 20))
     if glow_pos is not None:
         glow = QRadialGradient(glow_pos, max(rect.width(), rect.height()) * 0.45)
-        glow.setColorAt(0.0, QColor(255, 255, 255, 34))
+        glow.setColorAt(0.0, QColor(255, 255, 255, 36))
         glow.setColorAt(1.0, QColor(255, 255, 255, 0))
         p.fillPath(path, glow)
     p.restore()
 
-    # тонкая светлая обводка
+    # тонкая светящаяся кромка
     p.setBrush(Qt.NoBrush)
-    p.setPen(QPen(QColor(255, 255, 255, 70), 1.0))
+    p.setPen(QPen(QColor(255, 255, 255, 96), 1.0))
     p.drawPath(path)
 
 
@@ -123,6 +203,7 @@ def paint_bubble_glass(
     hover: bool = False,
     sparkle: bool = True,
     reflex_alpha: int = 55,
+    widget=None,
 ) -> None:
     """Нарисовать стеклянную «пузырьковую» плашку в *rect*.
 
@@ -137,10 +218,10 @@ def paint_bubble_glass(
     if theme.is_frosted():
         if body_alpha >= 160:
             # диалоги/редактор: плотное молочное стекло — тёмный текст читается
-            _paint_frosted_rect(p, rect, radius, milk=205)
+            _paint_frosted_rect(p, rect, radius, milk=205, widget=widget)
         else:
-            # панели: лёгкая изморозь, тёмный фон просвечивает — текст белый
-            _paint_frosted_rect(p, rect, radius, milk=30)
+            # панели: настоящее стекло — размытый фон просвечивает
+            _paint_frosted_rect(p, rect, radius, milk=30, widget=widget)
         return
 
     path = QPainterPath()
@@ -245,6 +326,7 @@ def paint_bubble_card(
     base_rgb: tuple[int, int, int],
     hover: bool = False,
     glow_pos: "QPointF | None" = None,
+    widget=None,
 ) -> None:
     """Прямоугольный «мыльный пузырь» — как paint_bubble_circle, но для карточек.
 
@@ -261,9 +343,10 @@ def paint_bubble_card(
         _paint_minimal_rect(p, rect, 12.0, tint, 255, hover=hover)
         return
     if theme.is_frosted():
-        # Frosted: молочное стекло на тёмном фоне, цвет — лёгкий оттенок
+        # Frosted: размытый фон под стеклом, цвет заметки — лёгкий оттенок
         _paint_frosted_rect(p, rect, radius, tint_rgb=base_rgb,
-                            milk=48, hover=hover, glow_pos=glow_pos)
+                            milk=48, hover=hover, glow_pos=glow_pos,
+                            widget=widget)
         return
 
     path = QPainterPath()
@@ -386,24 +469,29 @@ def paint_bubble_circle(
             p.drawEllipse(rect)
         return
     if theme.is_frosted():
-        # Frosted: молочный круг со светлой обводкой и верхним бликом
-        p.setPen(QPen(QColor(255, 255, 255, 90), 1.2))
-        p.setBrush(QColor(255, 255, 255, 64 + (18 if hover else 0)))
+        # Frosted: стеклянная линза — radial-градиент со светом из 30%/30%,
+        # внутреннее свечение и светлая кромка
+        body = QRadialGradient(
+            QPointF(rect.x() + rect.width() * 0.30, rect.y() + rect.height() * 0.30),
+            rect.width() * 0.85,
+        )
+        body.setColorAt(0.0, QColor(255, 255, 255, 150 + (25 if hover else 0)))
+        body.setColorAt(0.45, QColor(255, 255, 255, 60))
+        body.setColorAt(1.0, QColor(255, 255, 255, 16))
+        p.setPen(QPen(QColor(255, 255, 255, 110), 1.2))
+        p.setBrush(body)
         p.drawEllipse(rect)
-        p.save()
-        clip = QPainterPath()
-        clip.addEllipse(rect)
-        p.setClipPath(clip)
-        hl = QLinearGradient(rect.topLeft(), QPointF(rect.x(), rect.center().y()))
-        hl.setColorAt(0.0, QColor(255, 255, 255, 110))
-        hl.setColorAt(1.0, QColor(255, 255, 255, 0))
+        # внутреннее свечение по краю (inset glow)
+        inner = QRadialGradient(rect.center(), rect.width() * 0.52)
+        inner.setColorAt(0.0, QColor(255, 255, 255, 0))
+        inner.setColorAt(0.82, QColor(255, 255, 255, 0))
+        inner.setColorAt(1.0, QColor(255, 255, 255, 70))
         p.setPen(Qt.NoPen)
-        p.setBrush(hl)
+        p.setBrush(inner)
         p.drawEllipse(rect)
         if pressed:
             p.setBrush(QColor(0, 0, 30, 40))
             p.drawEllipse(rect)
-        p.restore()
         return
 
     path = QPainterPath()

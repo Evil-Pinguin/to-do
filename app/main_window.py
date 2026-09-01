@@ -5,10 +5,10 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, QSize
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap,
-    QRadialGradient,
+    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath,
+    QPen, QPixmap, QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
@@ -24,7 +24,7 @@ from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
-from .glass import paint_bubble_glass, paint_bubble_circle
+from .glass import blur_pixmap, paint_bubble_glass, paint_bubble_circle
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
 from .reminder import ReminderManager, REMIND_OFFSETS
@@ -130,13 +130,14 @@ class BackgroundWidget(QWidget):
             p.end()
             return
         if theme.is_frosted():
-            self._paint_frosted_bg(p, rect)
-            # пузыри рисуем и здесь — frosted-ветка painter'а сама разберётся
+            self._ensure_frosted_cache()
+            p.drawPixmap(0, 0, self._fr_cache)
+            # пузыри-линзы: увеличивают фон под собой, как настоящее стекло
             p.setRenderHint(QPainter.Antialiasing)
             for (fx, fy, r, phase, amp) in self._BUBBLES:
                 x = fx * rect.width()
                 y = fy * rect.height() + amp * math.sin(self._t * 0.35 + phase)
-                paint_bubble_circle(p, QRectF(x - r, y - r, r * 2, r * 2))
+                self._paint_lens_bubble(p, x, y, r)
             p.end()
             return
         key = (rect.width(), rect.height(), ambient.period())
@@ -153,29 +154,100 @@ class BackgroundWidget(QWidget):
         p.end()
 
     def _paint_frosted_bg(self, p: QPainter, rect) -> None:
-        """Глубокий сине-фиолетовый градиент + яркие мягкие свечения."""
-        w, h = rect.width(), rect.height()
-        grad = QLinearGradient(0, 0, w, h)   # диагональ, как 135deg
-        grad.setColorAt(0.0, QColor(theme.FR_BG_TOP))
-        grad.setColorAt(1.0, QColor(theme.FR_BG_BOTTOM))
-        p.fillRect(rect, grad)
+        """(устарело — см. _ensure_frosted_cache)"""
+        self._ensure_frosted_cache()
+        p.drawPixmap(0, 0, self._fr_cache)
+
+    _fr_cache: "QPixmap | None" = None
+    _fr_blur: "QPixmap | None" = None
+    _fr_key: tuple = ()
+
+    def _ensure_frosted_cache(self) -> None:
+        """Живой фон frosted: тёмная база + яркие цветовые пятна.
+
+        Кешируем и сам фон, и его размытую версию — её подкладывают
+        под себя стеклянные поверхности (см. glass.draw_frosted_backdrop).
+        """
+        w, h = max(1, self.width()), max(1, self.height())
+        if self._fr_cache is not None and self._fr_key == (w, h):
+            return
+        pm = QPixmap(w, h)
+        p = QPainter(pm)
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0, QColor("#1B2B5E"))
+        grad.setColorAt(1.0, QColor("#4C2589"))
+        p.fillRect(0, 0, w, h, grad)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
+        # яркие пятна — стеклу нужно на чём «играть»
         blobs = [
-            (59, 130, 246, 80, 0.12, 0.06, 0.55),    # голубое свечение сверху
-            (236, 72, 153, 55, 0.88, 0.30, 0.50),    # розовое справа
-            (255, 255, 255, 30, 0.50, 0.55, 0.60),   # белое в центре
-            (124, 58, 237, 70, 0.25, 0.95, 0.55),    # фиолет снизу
+            (34, 211, 238, 110, 0.15, 0.08, 0.45),   # циан
+            (236, 72, 153, 100, 0.88, 0.22, 0.42),   # розовый
+            (59, 130, 246, 115, 0.62, 0.58, 0.48),   # синий
+            (139, 92, 246, 120, 0.28, 0.88, 0.50),   # фиолет
+            (245, 158, 11, 55, 0.04, 0.55, 0.30),    # янтарный отблеск
         ]
         for (r_, g_, b_, a_, fx, fy, fr) in blobs:
             rad = fr * max(w, h)
             cx, cy = fx * w, fy * h
             g = QRadialGradient(cx, cy, rad)
             g.setColorAt(0.0, QColor(r_, g_, b_, a_))
-            g.setColorAt(0.6, QColor(r_, g_, b_, int(a_ * 0.4)))
+            g.setColorAt(0.55, QColor(r_, g_, b_, int(a_ * 0.45)))
             g.setColorAt(1.0, QColor(r_, g_, b_, 0))
             p.setBrush(g)
             p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
+        p.end()
+        self._fr_cache = pm
+        self._fr_blur = blur_pixmap(pm, 14)
+        self._fr_key = (w, h)
+
+    def frosted_blur(self) -> "QPixmap | None":
+        self._ensure_frosted_cache()
+        return self._fr_blur
+
+    def _paint_lens_bubble(self, p: QPainter, x: float, y: float, r: float) -> None:
+        """Декоративный пузырь-линза: преломляет (увеличивает) фон под собой."""
+        rect = QRectF(x - r, y - r, r * 2, r * 2)
+        clip = QPainterPath()
+        clip.addEllipse(rect)
+        # мягкая тень под линзой
+        sh = QRadialGradient(QPointF(x, y + r * 0.55), r * 1.25)
+        sh.setColorAt(0.0, QColor(0, 0, 30, 46))
+        sh.setColorAt(1.0, QColor(0, 0, 30, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(sh)
+        p.drawEllipse(QRectF(x - r * 1.25, y - r * 0.7 + r * 0.55,
+                             r * 2.5, r * 2.5 * 0.8))
+        # преломление: рисуем фон под пузырём с увеличением ~1.18
+        if self._fr_cache is not None:
+            mag = 1.18
+            sw = r * 2 / mag
+            src = QRectF(x - sw / 2, y - sw / 2, sw, sw)
+            p.save()
+            p.setClipPath(clip)
+            p.drawPixmap(rect, self._fr_cache, src)
+            p.restore()
+        # стеклянное тело поверх: свет из 30%/30%, кромка, внутренний отсвет
+        body = QRadialGradient(QPointF(x - r * 0.4, y - r * 0.4), r * 1.7)
+        body.setColorAt(0.0, QColor(255, 255, 255, 120))
+        body.setColorAt(0.45, QColor(255, 255, 255, 26))
+        body.setColorAt(1.0, QColor(255, 255, 255, 8))
+        p.setBrush(body)
+        p.setPen(QPen(QColor(255, 255, 255, 90), 1.0))
+        p.drawEllipse(rect)
+        inner = QRadialGradient(QPointF(x, y), r)
+        inner.setColorAt(0.0, QColor(255, 255, 255, 0))
+        inner.setColorAt(0.80, QColor(255, 255, 255, 0))
+        inner.setColorAt(1.0, QColor(255, 255, 255, 60))
+        p.setPen(Qt.NoPen)
+        p.setBrush(inner)
+        p.drawEllipse(rect)
+        # блик-полумесяц
+        spark = QRadialGradient(QPointF(x - r * 0.42, y - r * 0.45), r * 0.5)
+        spark.setColorAt(0.0, QColor(255, 255, 255, 150))
+        spark.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(spark)
+        p.drawEllipse(QRectF(x - r * 0.8, y - r * 0.85, r * 0.9, r * 0.75))
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +276,7 @@ class GlassPanel(QFrame):
             body_alpha=max(60, self._alpha_top - 75),
             sparkle=self._radius >= 14,
             reflex_alpha=45,
+            widget=self,
         )
         p.end()
 
@@ -441,6 +514,21 @@ class MainWindow(QMainWindow):
     # ==================================================================
     #  Тема и булавка
     # ==================================================================
+    def frosted_backdrop(self):
+        """Размытый снимок фона для стеклянных поверхностей (Liquid Glass)."""
+        if not theme.is_frosted():
+            return None
+        pm = self.bg.frosted_blur()
+        if pm is None:
+            return None
+        return pm, self.bg.mapTo(self, QPoint(0, 0))
+
+    def _frosted_scroll_sync(self, *_args) -> None:
+        if theme.is_frosted():
+            w = self.scroll.widget()
+            if w is not None:
+                w.update()
+
     def _set_theme(self, key: str) -> None:
         theme.set_current(key)
         for k, act in self._theme_actions.items():
@@ -622,6 +710,10 @@ class MainWindow(QMainWindow):
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
+        # frosted: карточки рисуют под собой размытый фон, привязанный к окну —
+        # при прокрутке их нужно перерисовать, иначе «стекло» поедет
+        self.scroll.verticalScrollBar().valueChanged.connect(self._frosted_scroll_sync)
+        self.scroll.horizontalScrollBar().valueChanged.connect(self._frosted_scroll_sync)
 
         board = QWidget()
         board.setObjectName("board")

@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer, Signal, QDateTime, QSize, QRectF
-from PySide6.QtGui import QImage, QPixmap, QKeySequence, QShortcut, QColor, QPainter
+from PySide6.QtGui import QImage, QPixmap, QKeySequence, QShortcut, QColor, QPainter, QLinearGradient
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QTextEdit,
@@ -195,15 +195,30 @@ class NoteEditor(QDialog):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        # подложка — оттенок неба с обоев (в минимализме — светло-серый Apple,
-        # во frosted — глубокий сине-фиолетовый)
         if theme.is_minimal():
-            bg = theme.MIN_BG
+            p.fillRect(self.rect(), QColor(theme.MIN_BG))
         elif theme.is_frosted():
-            bg = "#3A3F8F"
+            w, h = self.width(), self.height()
+            grad = QLinearGradient(0, 0, w, h)
+            grad.setColorAt(0.0, QColor("#26346B"))
+            grad.setColorAt(1.0, QColor("#4C2589"))
+            p.fillRect(self.rect(), grad)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(Qt.NoPen)
+            from PySide6.QtGui import QRadialGradient
+            for (r_, g_, b_, a_, fx, fy, fr) in (
+                (59, 130, 246, 90, 0.15, 0.05, 0.5),
+                (236, 72, 153, 70, 0.9, 0.9, 0.45),
+            ):
+                rad = fr * max(w, h)
+                cx, cy = fx * w, fy * h
+                g = QRadialGradient(cx, cy, rad)
+                g.setColorAt(0.0, QColor(r_, g_, b_, a_))
+                g.setColorAt(1.0, QColor(r_, g_, b_, 0))
+                p.setBrush(g)
+                p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
         else:
-            bg = "#DDF2F8"
-        p.fillRect(self.rect(), QColor(bg))
+            p.fillRect(self.rect(), QColor("#DDF2F8"))
         rect = QRectF(self.rect()).adjusted(3.5, 3.5, -3.5, -3.5)
         paint_bubble_glass(
             p, rect, 18.0,
