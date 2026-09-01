@@ -21,7 +21,7 @@ from .formatting import fmt_clock, now_dt, plural
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
 
-ASSETS_DIR = (__import__("pathlib").Path(__file__).resolve().parent.parent / "assets")
+from .paths import ASSETS_DIR
 
 SORT_MODES = [
     ("created", "По дате создания"),
