@@ -19,6 +19,8 @@ from PySide6.QtGui import (
     QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
 )
 
+from . import theme
+
 # Оттенок окружения для нижнего рефлекса (небо у горизонта + трава).
 _ENV_REFLEX = (191, 231, 226)
 # Холодный тон кромки-линзы (взят с края пузыря: #BDE4EB, чуть темнее).
@@ -31,6 +33,25 @@ def _mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[in
         int(a[1] + (b[1] - a[1]) * t),
         int(a[2] + (b[2] - a[2]) * t),
     )
+
+
+def _paint_minimal_rect(
+    p: QPainter,
+    rect: QRectF,
+    radius: float,
+    rgb: tuple[int, int, int],
+    alpha: int,
+    hover: bool = False,
+) -> None:
+    """Плашка в стиле минимализма: плоская, белая, волосяная граница."""
+    path = QPainterPath()
+    path.addRoundedRect(rect, radius, radius)
+    p.fillPath(path, QColor(rgb[0], rgb[1], rgb[2], alpha))
+    if hover:
+        p.fillPath(path, QColor(0, 0, 0, 8))
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(QColor(0, 0, 0, 26), 1.0))
+    p.drawPath(path)
 
 
 def paint_bubble_glass(
@@ -49,6 +70,10 @@ def paint_bubble_glass(
     плотнее и холоднее за счёт рима.
     """
     p.setRenderHint(QPainter.Antialiasing)
+
+    if theme.is_minimal():
+        _paint_minimal_rect(p, rect, radius, (255, 255, 255), 246)
+        return
 
     path = QPainterPath()
     path.addRoundedRect(rect, radius, radius)
@@ -159,6 +184,13 @@ def paint_bubble_card(
     """
     p.setRenderHint(QPainter.Antialiasing)
 
+    if theme.is_minimal():
+        # Минимализм: белая карточка с еле заметным тоном цвета заметки,
+        # волосяная граница — как у Apple.
+        tint = _mix((255, 255, 255), base_rgb, 0.10)
+        _paint_minimal_rect(p, rect, 12.0, tint, 255, hover=hover)
+        return
+
     path = QPainterPath()
     path.addRoundedRect(rect, radius, radius)
     r_, g_, b_ = base_rgb
@@ -257,6 +289,17 @@ def paint_bubble_circle(
     полумесяц сверху, искра с глинтом и цветной рефлекс снизу.
     """
     p.setRenderHint(QPainter.Antialiasing)
+
+    if theme.is_minimal():
+        # Минимализм: чистый белый круг с волосяной границей
+        p.setPen(QPen(QColor(0, 0, 0, 30), 1.0))
+        p.setBrush(QColor(255, 255, 255, 252 if not hover else 255))
+        p.drawEllipse(rect)
+        if pressed:
+            p.setBrush(QColor(0, 0, 0, 16))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(rect)
+        return
 
     path = QPainterPath()
     path.addEllipse(rect)

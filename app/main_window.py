@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import colors as C
+from . import theme
 from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
@@ -54,6 +55,10 @@ class BackgroundWidget(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         rect = self.rect()
+        if theme.is_minimal():
+            p.fillRect(rect, QColor(theme.MIN_BG))
+            p.end()
+            return
         if self._pix is None:
             from PySide6.QtGui import QLinearGradient
             top, bottom = QColor("#DFF1FB"), QColor("#E9F8EC")
@@ -142,12 +147,17 @@ class BubbleButton(QToolButton):
             pressed=self.isDown(),
         )
         # Плюсик: мягкая тень + белый крест со скруглёнными концами
+        # (в минимализме — синий системный плюс без тени)
         c = rect.center()
         arm = rect.width() * 0.185
-        for pen in (
-            QPen(QColor(90, 130, 160, 110), 5.5, Qt.SolidLine, Qt.RoundCap),
-            QPen(QColor(255, 255, 255, 240), 4.0, Qt.SolidLine, Qt.RoundCap),
-        ):
+        if theme.is_minimal():
+            pens = [QPen(QColor(theme.MIN_ACCENT), 3.5, Qt.SolidLine, Qt.RoundCap)]
+        else:
+            pens = [
+                QPen(QColor(90, 130, 160, 110), 5.5, Qt.SolidLine, Qt.RoundCap),
+                QPen(QColor(255, 255, 255, 240), 4.0, Qt.SolidLine, Qt.RoundCap),
+            ]
+        for pen in pens:
             p.setPen(pen)
             p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()))
             p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm))
@@ -211,6 +221,17 @@ class MainWindow(QMainWindow):
         self.fab.setMenu(fab_menu)
         self.fab.raise_()
 
+        # Мини-булавка для режима-виджета (топ-бар там спрятан)
+        self.pin_fab = QToolButton(central)
+        self.pin_fab.setText("📌")
+        self.pin_fab.setToolTip("Окно поверх всех остальных")
+        self.pin_fab.setCheckable(True)
+        self.pin_fab.setCursor(Qt.PointingHandCursor)
+        self.pin_fab.setFixedSize(QSize(30, 30))
+        self.pin_fab.setObjectName("pinFab")
+        self.pin_fab.toggled.connect(self._set_pinned)
+        self.pin_fab.setVisible(False)
+
         self._apply_style()
         self._start_clock()
 
@@ -233,6 +254,9 @@ class MainWindow(QMainWindow):
             central.height() - self.fab.height() - m,
         )
         self.fab.raise_()
+        # мини-булавка — правый верхний угол (только в режиме-виджете)
+        self.pin_fab.move(central.width() - self.pin_fab.width() - 8, 8)
+        self.pin_fab.raise_()
         super().resizeEvent(event)
 
     def _update_compact_mode(self) -> None:
@@ -243,6 +267,7 @@ class MainWindow(QMainWindow):
         self._compact = compact
         self.top_bar.setVisible(not compact)
         self.filter_panel.setVisible(not compact and self.filter_btn.isChecked())
+        self.pin_fab.setVisible(compact)
         if compact:
             self._outer_lay.setContentsMargins(6, 6, 6, 6)
             self.fab.set_compact(True)
@@ -260,6 +285,23 @@ class MainWindow(QMainWindow):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(14, 8, 14, 8)
         lay.setSpacing(8)
+
+        # Кнопка выбора темы — левый верхний угол
+        self.theme_btn = QToolButton(bar)
+        self.theme_btn.setText("◐ Тема")
+        self.theme_btn.setToolTip("Тема оформления")
+        self.theme_btn.setPopupMode(QToolButton.InstantPopup)
+        self.theme_btn.setCursor(Qt.PointingHandCursor)
+        tmenu = QMenu(self.theme_btn)
+        self._theme_actions = {}
+        for key, title in theme.THEME_NAMES.items():
+            act = tmenu.addAction(title)
+            act.setCheckable(True)
+            act.setChecked(theme.current() == key)
+            act.triggered.connect(lambda _=False, k=key: self._set_theme(k))
+            self._theme_actions[key] = act
+        self.theme_btn.setMenu(tmenu)
+        lay.addWidget(self.theme_btn)
 
         app_label = QLabel("✦ Aero Notes", bar)
         app_label.setObjectName("brandLabel")
@@ -335,7 +377,41 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, t=ntype: self._create_note(t))
         self.new_btn.setMenu(menu)
         lay.addWidget(self.new_btn)
+
+        # Булавка «поверх всех окон»
+        self.pin_btn = QToolButton(bar)
+        self.pin_btn.setText("📌")
+        self.pin_btn.setToolTip("Окно поверх всех остальных")
+        self.pin_btn.setCheckable(True)
+        self.pin_btn.setCursor(Qt.PointingHandCursor)
+        self.pin_btn.toggled.connect(self._set_pinned)
+        lay.addWidget(self.pin_btn)
         return bar
+
+    # ==================================================================
+    #  Тема и булавка
+    # ==================================================================
+    def _set_theme(self, key: str) -> None:
+        theme.set_current(key)
+        for k, act in self._theme_actions.items():
+            act.setChecked(k == key)
+        self._apply_style()
+        # перерисовать всё, что рисуется вручную
+        self.bg.update()
+        self.top_bar.update()
+        self.filter_panel.update()
+        self.fab.update()
+        self.pin_fab.update()
+        for card in self._cards:
+            card.update()
+
+    def _set_pinned(self, on: bool) -> None:
+        for b in (self.pin_btn, self.pin_fab):
+            b.blockSignals(True)
+            b.setChecked(on)
+            b.blockSignals(False)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, on)
+        self.show()  # после смены флага окно нужно показать заново
 
     # ==================================================================
     #  Панель фильтров
@@ -742,6 +818,20 @@ class MainWindow(QMainWindow):
     #  Стили
     # ==================================================================
     def _menu_qss(self) -> str:
+        if theme.is_minimal():
+            return f"""
+                QMenu {{
+                    background: #FFFFFF;
+                    border: 1px solid {theme.MIN_HAIRLINE};
+                    border-radius: 10px; padding: 5px;
+                    font-size: 13px; color: {theme.MIN_TEXT};
+                }}
+                QMenu::item {{ padding: 6px 26px 6px 14px; border-radius: 6px; }}
+                QMenu::item:selected {{ background: #F0F0F2; }}
+                QMenu::separator {{
+                    height: 1px; background: {theme.MIN_HAIRLINE}; margin: 5px 10px;
+                }}
+            """
         return """
             QMenu {
                 background: rgba(240,250,255,235);
@@ -757,6 +847,9 @@ class MainWindow(QMainWindow):
         """
 
     def _apply_style(self) -> None:
+        if theme.is_minimal():
+            self._apply_minimal_style()
+            return
         self.setStyleSheet(f"""
             MainWindow, BackgroundWidget {{ background: #E4F2FB; }}
 
@@ -822,6 +915,16 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 rgba(170,220,255,245), stop:1 rgba(105,175,235,245));
             }}
+            QToolButton#pinFab {{
+                background: rgba(255,255,255,190);
+                border: 1px solid rgba(255,255,255,230);
+                border-radius: 15px; padding: 0; font-size: 13px;
+            }}
+            QToolButton#pinFab:checked {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba(155,210,250,235), stop:1 rgba(90,160,220,235));
+                border: 1px solid rgba(255,255,255,230);
+            }}
             QPushButton {{
                 background: rgba(255,255,255,170);
                 border: 1px solid rgba(255,255,255,210);
@@ -867,6 +970,106 @@ class MainWindow(QMainWindow):
             }}
             QScrollBar::handle:horizontal {{
                 background: rgba(90,140,190,130); border-radius: 5px; min-width: 40px;
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+            {self._menu_qss()}
+        """)
+
+    def _apply_minimal_style(self) -> None:
+        """Минимализм в духе Apple: плоско, бело, волосяные границы."""
+        T, M, H, A = theme.MIN_TEXT, theme.MIN_MUTED, theme.MIN_HAIRLINE, theme.MIN_ACCENT
+        self.setStyleSheet(f"""
+            MainWindow, BackgroundWidget {{ background: {theme.MIN_BG}; }}
+            GlassPanel {{ background: transparent; border: none; }}
+
+            QLabel#brandLabel {{
+                color: {T}; font-size: 14px; font-weight: 700;
+                background: transparent; padding: 5px 10px; border: none;
+            }}
+            QLabel#clockLabel {{
+                color: {M}; font-size: 12px; font-weight: 500;
+                background: transparent; padding: 6px 8px; border: none;
+            }}
+            QLabel#countLabel {{ color: {M}; font-size: 11px; padding: 0 6px; background: transparent; }}
+            QLabel#emptyLabel {{ color: {M}; font-size: 15px; background: transparent; }}
+
+            QLineEdit {{
+                background: #FFFFFF;
+                border: 1px solid {H};
+                border-radius: 10px; padding: 7px 12px;
+                font-size: 12px; color: {T};
+                selection-background-color: {A};
+                selection-color: white;
+            }}
+            QLineEdit:focus {{ border: 1.5px solid {A}; }}
+            QComboBox {{
+                background: #FFFFFF; border: 1px solid {H};
+                border-radius: 10px; padding: 6px 12px;
+                font-size: 12px; color: {T};
+            }}
+            QComboBox:hover {{ background: #FAFAFC; }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox QAbstractItemView {{
+                background: #FFFFFF; border: 1px solid {H};
+                border-radius: 10px;
+                selection-background-color: #F0F0F2;
+                selection-color: {T};
+                outline: none; padding: 4px;
+            }}
+            QToolButton {{
+                background: #FFFFFF; border: 1px solid {H};
+                border-radius: 10px; padding: 6px 12px;
+                font-size: 12px; color: {T};
+            }}
+            QToolButton:hover {{ background: #F0F0F2; }}
+            QToolButton:checked {{ background: {A}; color: white; border: none; }}
+            QToolButton::menu-indicator {{ image: none; }}
+            QToolButton#newButton {{
+                background: {A}; color: white; font-weight: 600; border: none;
+            }}
+            QToolButton#newButton:hover {{ background: #0077ED; }}
+            QToolButton#pinFab {{
+                background: rgba(255,255,255,235); border: 1px solid {H};
+                border-radius: 15px; padding: 0; font-size: 13px;
+            }}
+            QToolButton#pinFab:checked {{ background: {A}; border: none; }}
+            QPushButton {{
+                background: #FFFFFF; border: 1px solid {H};
+                border-radius: 10px; padding: 6px 14px;
+                font-size: 12px; color: {T};
+            }}
+            QPushButton:hover {{ background: #F0F0F2; }}
+            QPushButton:checked {{
+                background: {A}; color: white; font-weight: 600; border: none;
+            }}
+
+            GlassPanel QCheckBox {{
+                color: {T}; font-size: 12px; spacing: 7px; background: transparent;
+            }}
+            GlassPanel QCheckBox::indicator {{
+                width: 15px; height: 15px; border-radius: 4px;
+                background: #FFFFFF; border: 1px solid {H};
+            }}
+            GlassPanel QCheckBox::indicator:checked {{
+                background: {A}; border: 1px solid {A};
+            }}
+
+            QScrollArea {{ background: transparent; border: none; }}
+            QWidget#board {{ background: transparent; }}
+            QScrollBar:vertical {{
+                background: transparent; width: 10px;
+                border-radius: 5px; margin: 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(0,0,0,55); border-radius: 5px; min-height: 40px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar:horizontal {{
+                background: transparent; height: 10px;
+                border-radius: 5px; margin: 2px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: rgba(0,0,0,55); border-radius: 5px; min-width: 40px;
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
             {self._menu_qss()}

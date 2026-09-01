@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import colors as C
+from . import theme
 from .db import Database
 from .formatting import fmt_dt, plural, now_dt
 from .glass import paint_bubble_glass
@@ -114,8 +115,16 @@ class NoteEditor(QDialog):
         self._timer.timeout.connect(self._commit)
 
         self.setWindowTitle("Редактирование")
-        self.resize(660, 720)
-        self.setMinimumSize(560, 560)
+        # Адаптивный размер: не больше окна-родителя (актуально для
+        # маленького окна-виджета), но и не меньше разумного минимума.
+        self.setMinimumSize(340, 400)
+        win = parent.window() if parent is not None else None
+        if win is not None:
+            w = max(360, min(660, win.width() - 40))
+            h = max(420, min(720, win.height() - 40))
+            self.resize(w, h)
+        else:
+            self.resize(660, 720)
         self._apply_bg()
 
         root = QVBoxLayout(self)
@@ -186,8 +195,9 @@ class NoteEditor(QDialog):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        # подложка — оттенок неба с обоев, виден в скруглённых углах
-        p.fillRect(self.rect(), QColor("#DDF2F8"))
+        # подложка — оттенок неба с обоев (в минимализме — светло-серый Apple)
+        bg = theme.MIN_BG if theme.is_minimal() else "#DDF2F8"
+        p.fillRect(self.rect(), QColor(bg))
         rect = QRectF(self.rect()).adjusted(3.5, 3.5, -3.5, -3.5)
         paint_bubble_glass(
             p, rect, 18.0,
