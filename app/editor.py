@@ -10,8 +10,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import List, Optional
 
-from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer, Signal, QDateTime, QSize
-from PySide6.QtGui import QImage, QPixmap, QKeySequence, QShortcut
+from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer, Signal, QDateTime, QSize, QRectF
+from PySide6.QtGui import QImage, QPixmap, QKeySequence, QShortcut, QColor, QPainter
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QTextEdit,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from . import colors as C
 from .db import Database
 from .formatting import fmt_dt, plural, now_dt
+from .glass import paint_bubble_glass
 from .models import ListItem, dump_list, TYPE_LIST, TYPE_TASK, PRIORITIES
 
 AUTOSAVE_MS = 1000  # пауза после ввода, после которой сохраняем
@@ -178,15 +179,24 @@ class NoteEditor(QDialog):
     #  Сборка интерфейса
     # ==================================================================
     def _apply_bg(self) -> None:
-        base_r, base_g, base_b = C.base_rgb(self.note.color)
-        self.setStyleSheet(f"""
-            NoteEditor {{
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba({base_r},{base_g},{base_b},210),
-                    stop:0.5 rgba({base_r},{base_g},{base_b},190),
-                    stop:1 rgba({max(0,base_r-22)},{max(0,base_g-22)},{max(0,base_b-22)},215));
-            }}
-        """)
+        # Фон рисуем вручную в paintEvent — «пузырьковое» стекло цвета
+        # заметки поверх светлого неба (см. app/glass.py).
+        self.setStyleSheet("NoteEditor { background: transparent; }")
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        # подложка — оттенок неба с обоев, виден в скруглённых углах
+        p.fillRect(self.rect(), QColor("#DDF2F8"))
+        rect = QRectF(self.rect()).adjusted(3.5, 3.5, -3.5, -3.5)
+        paint_bubble_glass(
+            p, rect, 18.0,
+            base_rgb=C.base_rgb(self.note.color),
+            body_alpha=185,          # плотнее карточек: под ним поля ввода
+            reflex_alpha=45,
+        )
+        p.end()
+        super().paintEvent(event)
 
     def _build_text_ui(self, placeholder: str = "") -> QTextEdit:
         self.text_edit = QTextEdit(self.note.content, self)

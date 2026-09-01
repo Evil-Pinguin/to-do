@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPixmap,
+    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap,
 )
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
@@ -20,6 +20,7 @@ from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
+from .glass import paint_bubble_glass
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
 from .paths import ASSETS_DIR
@@ -66,7 +67,8 @@ class BackgroundWidget(QWidget):
             tw, th = int(pw * scale), int(ph * scale)
             x, y = (rect.width() - tw) // 2, (rect.height() - th) // 2
             p.drawPixmap(x, y, tw, th, self._pix)
-        p.fillRect(rect, QColor(255, 255, 255, 50))
+        # Вуаль тоньше, чем раньше: пузыри и лучи на обоях должны читаться
+        p.fillRect(rect, QColor(255, 255, 255, 34))
         p.end()
 
 
@@ -87,45 +89,16 @@ class GlassPanel(QFrame):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        r = float(self._radius)
-
-        path = QPainterPath()
-        path.addRoundedRect(rect, r, r)
-
-        # Основное стекло — чисто белое с лёгким голубым оттенком снизу
-        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        body.setColorAt(0.0,  QColor(255, 255, 255, self._alpha_top))
-        body.setColorAt(0.6,  QColor(240, 248, 255, self._alpha_top - 20))
-        body.setColorAt(1.0,  QColor(220, 238, 252, self._alpha_bottom))
-        p.fillPath(path, body)
-
-        # Specular highlight — верхняя четверть
-        shine_h = rect.height() * 0.38
-        shine_rect = QRectF(rect.x(), rect.y(), rect.width(), shine_h)
-        shine_path = QPainterPath()
-        shine_path.addRoundedRect(shine_rect, r, r)
-        shine_path = shine_path.intersected(path)
-        shine = QLinearGradient(shine_rect.topLeft(), shine_rect.bottomLeft())
-        shine.setColorAt(0.0, QColor(255, 255, 255, 160))
-        shine.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.fillPath(shine_path, shine)
-
-        # Нижний рефлекс
-        ref_h = rect.height() * 0.18
-        ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
-        ref_path = QPainterPath()
-        ref_path.addRoundedRect(ref_rect, r, r)
-        ref_path = ref_path.intersected(path)
-        ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
-        ref.setColorAt(0.0, QColor(255, 255, 255, 0))
-        ref.setColorAt(1.0, QColor(255, 255, 255, 60))
-        p.fillPath(ref_path, ref)
-
-        # Рамка — светлая полупрозрачная
-        p.setPen(QColor(200, 228, 248, 200))
-        p.drawPath(path)
+        # Панели держат контролы — тело чуть плотнее карточек,
+        # но стиль тот же: рим, полумесяц, искра, цветной рефлекс.
+        paint_bubble_glass(
+            p, rect, float(self._radius),
+            base_rgb=(248, 253, 255),
+            body_alpha=min(255, self._alpha_top - 40),
+            sparkle=self._radius >= 14,
+            reflex_alpha=45,
+        )
         p.end()
 
 

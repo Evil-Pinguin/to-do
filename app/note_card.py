@@ -7,7 +7,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRect, QRectF
 from PySide6.QtGui import (
-    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPixmap,
+    QColor, QFont, QPainter, QPixmap,
 )
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from . import colors as C
 from .formatting import fmt_short, fmt_deadline
+from .glass import paint_bubble_glass
 from .models import Note, TYPE_LIST, TYPE_TASK, PRIORITY_NAMES
 
 PREVIEW_CHARS = 420
@@ -36,56 +37,15 @@ class GlassCard(QFrame):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        r = 16.0
-
-        path = QPainterPath()
-        path.addRoundedRect(rect, r, r)
-
-        # ---- 1. Основное цветное стекло ----
-        base_r, base_g, base_b = C.base_rgb(self._color_key)
-        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        body.setColorAt(0.0,  QColor(base_r, base_g, base_b, 195))
-        body.setColorAt(0.55, QColor(base_r, base_g, base_b, 175))
-        body.setColorAt(1.0,  QColor(
-            max(0, base_r - 18), max(0, base_g - 18), max(0, base_b - 18), 210
-        ))
-        p.fillPath(path, body)
-
-        # ---- 2. Specular highlight — верхняя треть (самый главный glass-эффект) ----
-        shine_h = rect.height() * 0.40
-        shine_rect = QRectF(rect.x(), rect.y(), rect.width(), shine_h)
-        shine_path = QPainterPath()
-        shine_path.addRoundedRect(shine_rect, r, r)
-        shine_path = shine_path.intersected(path)
-        shine = QLinearGradient(shine_rect.topLeft(), shine_rect.bottomLeft())
-        shine.setColorAt(0.0,  QColor(255, 255, 255, 155))
-        shine.setColorAt(0.45, QColor(255, 255, 255, 60))
-        shine.setColorAt(1.0,  QColor(255, 255, 255, 0))
-        p.fillPath(shine_path, shine)
-
-        # ---- 3. Нижний рефлекс (мягкое белое свечение снизу) ----
-        ref_h = rect.height() * 0.22
-        ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
-        ref_path = QPainterPath()
-        ref_path.addRoundedRect(ref_rect, r, r)
-        ref_path = ref_path.intersected(path)
-        ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
-        ref.setColorAt(0.0, QColor(255, 255, 255, 0))
-        ref.setColorAt(1.0, QColor(255, 255, 255, 55))
-        p.fillPath(ref_path, ref)
-
-        # ---- 4. Hover-подсветка (если под мышкой) ----
-        if self.underMouse():
-            hover = QPainterPath()
-            hover.addRoundedRect(rect, r, r)
-            p.fillPath(hover, QColor(255, 255, 255, 30))
-
-        # ---- 5. Внешняя рамка (светлая, полупрозрачная) ----
-        p.setPen(QColor(255, 255, 255, 180))
-        p.drawPath(path)
-
+        # Стиль «мыльного пузыря» с обоев: прозрачное тело, рим-кромка,
+        # блик-полумесяц + искра, цветной рефлекс снизу (см. app/glass.py).
+        paint_bubble_glass(
+            p, rect, 16.0,
+            base_rgb=C.base_rgb(self._color_key),
+            body_alpha=150,
+            hover=self.underMouse(),
+        )
         p.end()
 
     def enterEvent(self, event) -> None:  # noqa: N802

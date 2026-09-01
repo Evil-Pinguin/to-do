@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QDialog, QFrame, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QWidget,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from .colors import color_name
 from .db import Database
 from .formatting import fmt_dt, fmt_deadline, fmt_history_ts, plural
+from .glass import paint_bubble_glass
 from .models import Note, TYPE_TASK, PRIORITY_NAMES
 
 
@@ -31,34 +32,15 @@ class GlassDialog(QDialog):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        r = float(self._RADIUS)
-
-        path = QPainterPath()
-        path.addRoundedRect(rect, r, r)
-
-        # Основное стекло
-        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        body.setColorAt(0.0,  QColor(255, 255, 255, 235))
-        body.setColorAt(0.55, QColor(242, 250, 255, 220))
-        body.setColorAt(1.0,  QColor(225, 242, 255, 215))
-        p.fillPath(path, body)
-
-        # Specular highlight
-        shine_h = rect.height() * 0.35
-        shine_rect = QRectF(rect.x(), rect.y(), rect.width(), shine_h)
-        shine_path = QPainterPath()
-        shine_path.addRoundedRect(shine_rect, r, r)
-        shine_path = shine_path.intersected(path)
-        shine = QLinearGradient(shine_rect.topLeft(), shine_rect.bottomLeft())
-        shine.setColorAt(0.0, QColor(255, 255, 255, 170))
-        shine.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.fillPath(shine_path, shine)
-
-        # Рамка
-        p.setPen(QColor(200, 228, 250, 210))
-        p.drawPath(path)
+        # Диалоги — самое плотное стекло (много текста), но стиль тот же
+        # «пузырьковый»: рим-кромка, полумесяц, искра, цветной рефлекс.
+        paint_bubble_glass(
+            p, rect, float(self._RADIUS),
+            base_rgb=(250, 253, 255),
+            body_alpha=205,
+            reflex_alpha=40,
+        )
         p.end()
 
     def _glass_btn_style(self) -> str:
