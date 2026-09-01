@@ -38,7 +38,7 @@ class GlassDialog(QDialog):
         paint_bubble_glass(
             p, rect, float(self._RADIUS),
             base_rgb=(250, 253, 255),
-            body_alpha=205,
+            body_alpha=195,
             reflex_alpha=40,
         )
         p.end()

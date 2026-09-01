@@ -192,7 +192,7 @@ class NoteEditor(QDialog):
         paint_bubble_glass(
             p, rect, 18.0,
             base_rgb=C.base_rgb(self.note.color),
-            body_alpha=185,          # плотнее карточек: под ним поля ввода
+            body_alpha=170,         # плотнее карточек: под ним поля ввода
             reflex_alpha=45,
         )
         p.end()

@@ -5,12 +5,12 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, QSize
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap,
+    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
+    QCheckBox, QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
     QScrollArea, QToolButton, QVBoxLayout, QWidget, QMessageBox,
 )
@@ -20,7 +20,7 @@ from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
-from .glass import paint_bubble_glass
+from .glass import paint_bubble_glass, paint_bubble_circle
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
 from .paths import ASSETS_DIR
@@ -95,11 +95,65 @@ class GlassPanel(QFrame):
         paint_bubble_glass(
             p, rect, float(self._radius),
             base_rgb=(248, 253, 255),
-            body_alpha=min(255, self._alpha_top - 40),
+            body_alpha=max(60, self._alpha_top - 75),
             sparkle=self._radius >= 14,
             reflex_alpha=45,
         )
         p.end()
+
+
+# ---------------------------------------------------------------------------
+#  Круглая кнопка-пузырь «+» — создание заметок (правый нижний угол)
+# ---------------------------------------------------------------------------
+
+class BubbleButton(QToolButton):
+    """Плавающая круглая кнопка в виде мыльного пузыря с плюсиком."""
+
+    SIZE = 74
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setFixedSize(QSize(self.SIZE, self.SIZE))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Создать заметку")
+        self.setPopupMode(QToolButton.InstantPopup)
+        self.setStyleSheet(
+            "QToolButton { background: transparent; border: none; }"
+            "QToolButton::menu-indicator { image: none; }"
+        )
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(26)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(70, 120, 160, 70))
+        self.setGraphicsEffect(shadow)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        rect = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+        paint_bubble_circle(
+            p, rect,
+            hover=self.underMouse(),
+            pressed=self.isDown(),
+        )
+        # Плюсик: мягкая тень + белый крест со скруглёнными концами
+        c = rect.center()
+        arm = rect.width() * 0.185
+        for pen in (
+            QPen(QColor(90, 130, 160, 110), 5.5, Qt.SolidLine, Qt.RoundCap),
+            QPen(QColor(255, 255, 255, 240), 4.0, Qt.SolidLine, Qt.RoundCap),
+        ):
+            p.setPen(pen)
+            p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()))
+            p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm))
+        p.end()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().leaveEvent(event)
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +192,15 @@ class MainWindow(QMainWindow):
         self._build_board()
         body.addWidget(self.scroll, 1)
 
+        # Плавающая кнопка-пузырь «+» (правый нижний угол)
+        self.fab = BubbleButton(central)
+        fab_menu = QMenu(self.fab)
+        for ntype in (TYPE_NOTE, TYPE_LIST, TYPE_TASK):
+            act = fab_menu.addAction(TYPE_NAMES[ntype])
+            act.triggered.connect(lambda _=False, t=ntype: self._create_note(t))
+        self.fab.setMenu(fab_menu)
+        self.fab.raise_()
+
         self._apply_style()
         self._start_clock()
 
@@ -150,7 +213,15 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:  # noqa: N802
         # Обои должны растягиваться на всё окно (иначе останутся крошечными
         # в углу — их размер layout'ом не управляется).
-        self.bg.setGeometry(self.centralWidget().rect())
+        central = self.centralWidget()
+        self.bg.setGeometry(central.rect())
+        # Кнопка-пузырь — в правом нижнем углу поверх всего
+        m = 26
+        self.fab.move(
+            central.width() - self.fab.width() - m,
+            central.height() - self.fab.height() - m,
+        )
+        self.fab.raise_()
         super().resizeEvent(event)
 
     # ==================================================================

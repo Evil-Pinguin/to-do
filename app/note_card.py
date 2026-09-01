@@ -43,7 +43,7 @@ class GlassCard(QFrame):
         paint_bubble_glass(
             p, rect, 16.0,
             base_rgb=C.base_rgb(self._color_key),
-            body_alpha=150,
+            body_alpha=120,
             hover=self.underMouse(),
         )
         p.end()

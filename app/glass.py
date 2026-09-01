@@ -68,10 +68,19 @@ def paint_bubble_glass(
 
     # ---- 2. Рим — мягкое кольцо преломления вместо жёсткой рамки ----------
     rim = _mix(base_rgb, _RIM_COOL, 0.55)
-    for width, alpha in ((7.0, 22), (4.5, 32), (2.4, 46)):
+    for width, alpha in ((8.0, 26), (5.0, 38), (2.6, 54)):
         p.setPen(QPen(QColor(rim[0], rim[1], rim[2], alpha), width))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
+
+    # ---- 2b. Диагональный луч света — как лучи солнца на обоях ------------
+    sheen = QLinearGradient(rect.topRight(), rect.bottomLeft())
+    sheen.setColorAt(0.00, QColor(255, 255, 255, 0))
+    sheen.setColorAt(0.40, QColor(255, 255, 255, 0))
+    sheen.setColorAt(0.50, QColor(255, 255, 255, 26))
+    sheen.setColorAt(0.60, QColor(255, 255, 255, 0))
+    sheen.setColorAt(1.00, QColor(255, 255, 255, 0))
+    p.fillPath(path, sheen)
 
     # ---- 3. Блик-полумесяц вдоль верхней дуги (свет слева-сверху) ---------
     ew = rect.width() * 1.25
@@ -80,8 +89,8 @@ def paint_bubble_glass(
     crescent.addEllipse(QRectF(rect.x() - ew * 0.14, rect.y() - eh * 0.42, ew, eh))
     crescent = crescent.intersected(path)
     shine = QLinearGradient(rect.topLeft(), QPointF(rect.x(), rect.y() + eh * 0.58))
-    shine.setColorAt(0.0, QColor(255, 255, 255, 135))
-    shine.setColorAt(0.55, QColor(255, 255, 255, 45))
+    shine.setColorAt(0.0, QColor(255, 255, 255, 150))
+    shine.setColorAt(0.55, QColor(255, 255, 255, 52))
     shine.setColorAt(1.0, QColor(255, 255, 255, 0))
     p.fillPath(crescent, shine)
 
@@ -134,3 +143,94 @@ def paint_bubble_glass(
     p.setBrush(Qt.NoBrush)
     p.setPen(QPen(QColor(255, 255, 255, 165), 1.0))
     p.drawPath(path)
+
+
+def paint_bubble_circle(
+    p: QPainter,
+    rect: QRectF,
+    hover: bool = False,
+    pressed: bool = False,
+) -> None:
+    """Круглый «мыльный пузырь» — максимально близко к пузырям с обоев.
+
+    Тело почти полностью прозрачное (линза: плотнее к краю), рим-кромка,
+    полумесяц сверху, искра с глинтом и цветной рефлекс снизу.
+    """
+    p.setRenderHint(QPainter.Antialiasing)
+
+    path = QPainterPath()
+    path.addEllipse(rect)
+    center = rect.center()
+    rad = rect.width() / 2.0
+
+    # ---- 1. Тело-линза: прозрачный центр, плотнее к краю -------------------
+    body = QRadialGradient(center, rad)
+    boost = 26 if hover else 0
+    body.setColorAt(0.00, QColor(236, 251, 255, 26 + boost))
+    body.setColorAt(0.72, QColor(226, 246, 252, 44 + boost))
+    body.setColorAt(0.93, QColor(205, 236, 246, 92 + boost))
+    body.setColorAt(1.00, QColor(189, 228, 235, 128 + boost))
+    p.fillPath(path, body)
+
+    p.save()
+    p.setClipPath(path)
+
+    # ---- 2. Рим-кромка ------------------------------------------------------
+    for width, alpha in ((6.0, 42), (3.4, 60), (1.6, 84)):
+        p.setPen(QPen(QColor(_RIM_COOL[0], _RIM_COOL[1], _RIM_COOL[2], alpha), width))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(rect.adjusted(0.8, 0.8, -0.8, -0.8))
+
+    # ---- 3. Полумесяц сверху (свет слева-сверху) ---------------------------
+    crescent = QPainterPath(path)
+    inner = QPainterPath()
+    inner.addEllipse(rect.adjusted(rad * 0.16, rad * 0.34, -rad * 0.02, rad * 0.22))
+    crescent = crescent.subtracted(inner)
+    top_half = QPainterPath()
+    top_half.addRect(QRectF(rect.x(), rect.y(), rect.width(), rect.height() * 0.55))
+    crescent = crescent.intersected(top_half)
+    shine = QLinearGradient(rect.topLeft(), QPointF(rect.x(), center.y()))
+    shine.setColorAt(0.0, QColor(255, 255, 255, 205))
+    shine.setColorAt(1.0, QColor(255, 255, 255, 0))
+    p.fillPath(crescent, shine)
+
+    # ---- 4. Искра с крестовым глинтом --------------------------------------
+    cx = rect.x() + rect.width() * 0.30
+    cy = rect.y() + rect.height() * 0.26
+    srad = rad * 0.16
+    p.setPen(Qt.NoPen)
+    halo = QRadialGradient(QPointF(cx, cy), srad * 2.4)
+    halo.setColorAt(0.0, QColor(255, 255, 255, 200))
+    halo.setColorAt(0.5, QColor(255, 255, 255, 70))
+    halo.setColorAt(1.0, QColor(255, 255, 255, 0))
+    p.setBrush(halo)
+    p.drawEllipse(QPointF(cx, cy), srad * 2.4, srad * 2.4)
+    for w, h in ((srad * 3.6, srad * 0.55), (srad * 0.55, srad * 3.6)):
+        g = QRadialGradient(QPointF(cx, cy), max(w, h) / 2)
+        g.setColorAt(0.0, QColor(255, 255, 255, 215))
+        g.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(g)
+        p.drawEllipse(QPointF(cx, cy), w / 2, h / 2)
+
+    # ---- 5. Нижний цветной рефлекс ------------------------------------------
+    reflex = QPainterPath(path)
+    ref_inner = QPainterPath()
+    ref_inner.addEllipse(rect.adjusted(rad * 0.06, -rad * 0.30, -rad * 0.20, -rad * 0.18))
+    reflex = reflex.subtracted(ref_inner)
+    bottom_half = QPainterPath()
+    bottom_half.addRect(QRectF(rect.x(), center.y(), rect.width(), rect.height()))
+    reflex = reflex.intersected(bottom_half)
+    ref_g = QLinearGradient(QPointF(rect.x(), center.y()), rect.bottomLeft())
+    ref_g.setColorAt(0.0, QColor(_ENV_REFLEX[0], _ENV_REFLEX[1], _ENV_REFLEX[2], 0))
+    ref_g.setColorAt(1.0, QColor(_ENV_REFLEX[0], _ENV_REFLEX[1], _ENV_REFLEX[2], 120))
+    p.fillPath(reflex, ref_g)
+
+    if pressed:
+        p.fillPath(path, QColor(150, 200, 225, 45))
+
+    p.restore()
+
+    # ---- 6. Внешний контур ---------------------------------------------------
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(QColor(255, 255, 255, 190), 1.2))
+    p.drawEllipse(rect)
