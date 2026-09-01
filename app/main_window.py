@@ -5,23 +5,24 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, QSize
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
 from PySide6.QtGui import (
-    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPen, QPixmap,
+    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
     QScrollArea, QToolButton, QVBoxLayout, QWidget, QMessageBox,
 )
 
 from . import colors as C
 from . import theme
+from .bubbles import BubbleButton
 from .db import Database
 from .details_dialog import DetailsDialog
 from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
-from .glass import paint_bubble_glass, paint_bubble_circle
+from .glass import paint_bubble_glass
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
 from .paths import ASSETS_DIR
@@ -108,71 +109,6 @@ class GlassPanel(QFrame):
 
 
 # ---------------------------------------------------------------------------
-#  Круглая кнопка-пузырь «+» — создание заметок (правый нижний угол)
-# ---------------------------------------------------------------------------
-
-class BubbleButton(QToolButton):
-    """Плавающая круглая кнопка в виде мыльного пузыря с плюсиком."""
-
-    SIZE = 74
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setFixedSize(QSize(self.SIZE, self.SIZE))
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Создать заметку")
-        self.setPopupMode(QToolButton.InstantPopup)
-        self.setStyleSheet(
-            "QToolButton { background: transparent; border: none; }"
-            "QToolButton::menu-indicator { image: none; }"
-        )
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(26)
-        shadow.setOffset(0, 6)
-        shadow.setColor(QColor(70, 120, 160, 70))
-        self.setGraphicsEffect(shadow)
-
-    def set_compact(self, on: bool) -> None:
-        """В режиме-виджете пузырь поменьше, чтобы не загораживал список."""
-        s = 52 if on else self.SIZE
-        self.setFixedSize(QSize(s, s))
-        self.update()
-
-    def paintEvent(self, event) -> None:  # noqa: N802
-        p = QPainter(self)
-        rect = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
-        paint_bubble_circle(
-            p, rect,
-            hover=self.underMouse(),
-            pressed=self.isDown(),
-        )
-        # Плюсик: мягкая тень + белый крест со скруглёнными концами
-        # (в минимализме — синий системный плюс без тени)
-        c = rect.center()
-        arm = rect.width() * 0.185
-        if theme.is_minimal():
-            pens = [QPen(QColor(theme.MIN_ACCENT), 3.5, Qt.SolidLine, Qt.RoundCap)]
-        else:
-            pens = [
-                QPen(QColor(90, 130, 160, 110), 5.5, Qt.SolidLine, Qt.RoundCap),
-                QPen(QColor(255, 255, 255, 240), 4.0, Qt.SolidLine, Qt.RoundCap),
-            ]
-        for pen in pens:
-            p.setPen(pen)
-            p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()))
-            p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm))
-        p.end()
-
-    def enterEvent(self, event) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(event)
-
-
-# ---------------------------------------------------------------------------
 #  Главное окно
 # ---------------------------------------------------------------------------
 
@@ -182,8 +118,8 @@ class MainWindow(QMainWindow):
         self.db = db
         self.setWindowTitle("Aero Notes — заметки и задачи")
         self.resize(1340, 850)
-        # Минимум маленький: окно можно сжать в «виджет» со списком заметок
-        self.setMinimumSize(320, 380)
+        # Минимум совсем маленький: окно можно сжать в «виджет» со списком
+        self.setMinimumSize(280, 320)
 
         self._cards: List[NoteCard] = []
         self._cols = 0
@@ -221,6 +157,12 @@ class MainWindow(QMainWindow):
         self.fab.setMenu(fab_menu)
         self.fab.raise_()
 
+        # Кнопка-пузырь поменьше — открывает песочницу со связями
+        self.sandbox_btn = BubbleButton(central, glyph="graph", size=52)
+        self.sandbox_btn.setToolTip("Песочница: холст со связями заметок")
+        self.sandbox_btn.clicked.connect(self._open_sandbox)
+        self._sandbox_win = None
+
         # Мини-булавка для режима-виджета (топ-бар там спрятан)
         self.pin_fab = QToolButton(central)
         self.pin_fab.setText("📌")
@@ -254,6 +196,12 @@ class MainWindow(QMainWindow):
             central.height() - self.fab.height() - m,
         )
         self.fab.raise_()
+        # пузырь песочницы — слева от «+», по нижнему краю
+        self.sandbox_btn.move(
+            self.fab.x() - self.sandbox_btn.width() - 10,
+            self.fab.y() + self.fab.height() - self.sandbox_btn.height(),
+        )
+        self.sandbox_btn.raise_()
         # мини-булавка — правый верхний угол (только в режиме-виджете)
         self.pin_fab.move(central.width() - self.pin_fab.width() - 8, 8)
         self.pin_fab.raise_()
@@ -271,9 +219,11 @@ class MainWindow(QMainWindow):
         if compact:
             self._outer_lay.setContentsMargins(6, 6, 6, 6)
             self.fab.set_compact(True)
+            self.sandbox_btn.set_compact(True)
         else:
             self._outer_lay.setContentsMargins(14, 10, 14, 12)
             self.fab.set_compact(False)
+            self.sandbox_btn.set_compact(False)
         self._relayout(force=True)
 
     # ==================================================================
@@ -401,9 +351,17 @@ class MainWindow(QMainWindow):
         self.top_bar.update()
         self.filter_panel.update()
         self.fab.update()
+        self.sandbox_btn.update()
         self.pin_fab.update()
         for card in self._cards:
             card.update()
+        # песочница, если открыта
+        if getattr(self, "_sandbox_win", None) is not None and self._sandbox_win.isVisible():
+            self._sandbox_win.setStyleSheet(self.styleSheet())
+            self._sandbox_win.canvas.update()
+            self._sandbox_win.fab.update()
+            for c in self._sandbox_win.canvas.cards:
+                c.update()
 
     def _set_pinned(self, on: bool) -> None:
         for b in (self.pin_btn, self.pin_fab):
@@ -412,6 +370,17 @@ class MainWindow(QMainWindow):
             b.blockSignals(False)
         self.setWindowFlag(Qt.WindowStaysOnTopHint, on)
         self.show()  # после смены флага окно нужно показать заново
+
+    # ==================================================================
+    #  Песочница
+    # ==================================================================
+    def _open_sandbox(self) -> None:
+        from .sandbox import SandboxWindow
+        if self._sandbox_win is None or not self._sandbox_win.isVisible():
+            self._sandbox_win = SandboxWindow(self.db, self)
+        self._sandbox_win.show()
+        self._sandbox_win.raise_()
+        self._sandbox_win.activateWindow()
 
     # ==================================================================
     #  Панель фильтров
