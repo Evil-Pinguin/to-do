@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Карточка заметки для сетки главного экрана."""
+"""Карточка заметки для сетки главного экрана — Frutiger Aero glass style."""
 from __future__ import annotations
 
 import html
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QPoint, QSize
-from PySide6.QtGui import QColor, QFont, QPixmap
+from PySide6.QtCore import Qt, Signal, QPoint, QSize, QRect, QRectF
+from PySide6.QtGui import (
+    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPixmap,
+)
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout,
     QGraphicsDropShadowEffect, QWidget,
@@ -19,43 +21,121 @@ from .models import Note, TYPE_LIST, TYPE_TASK, PRIORITY_NAMES
 PREVIEW_CHARS = 420
 
 
-class NoteCard(QFrame):
+class GlassCard(QFrame):
+    """Базовый glass-виджет: рисует многослойный эффект жидкого стекла."""
+
+    def __init__(self, color_key: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._color_key = color_key
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.setObjectName("glassCard")
+
+    def set_color(self, key: str) -> None:
+        self._color_key = key
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        r = 16.0
+
+        path = QPainterPath()
+        path.addRoundedRect(rect, r, r)
+
+        # ---- 1. Основное цветное стекло ----
+        base_r, base_g, base_b = C.base_rgb(self._color_key)
+        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        body.setColorAt(0.0,  QColor(base_r, base_g, base_b, 195))
+        body.setColorAt(0.55, QColor(base_r, base_g, base_b, 175))
+        body.setColorAt(1.0,  QColor(
+            max(0, base_r - 18), max(0, base_g - 18), max(0, base_b - 18), 210
+        ))
+        p.fillPath(path, body)
+
+        # ---- 2. Specular highlight — верхняя треть (самый главный glass-эффект) ----
+        shine_h = rect.height() * 0.40
+        shine_rect = QRectF(rect.x(), rect.y(), rect.width(), shine_h)
+        shine_path = QPainterPath()
+        shine_path.addRoundedRect(shine_rect, r, r)
+        shine_path = shine_path.intersected(path)
+        shine = QLinearGradient(shine_rect.topLeft(), shine_rect.bottomLeft())
+        shine.setColorAt(0.0,  QColor(255, 255, 255, 155))
+        shine.setColorAt(0.45, QColor(255, 255, 255, 60))
+        shine.setColorAt(1.0,  QColor(255, 255, 255, 0))
+        p.fillPath(shine_path, shine)
+
+        # ---- 3. Нижний рефлекс (мягкое белое свечение снизу) ----
+        ref_h = rect.height() * 0.22
+        ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
+        ref_path = QPainterPath()
+        ref_path.addRoundedRect(ref_rect, r, r)
+        ref_path = ref_path.intersected(path)
+        ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
+        ref.setColorAt(0.0, QColor(255, 255, 255, 0))
+        ref.setColorAt(1.0, QColor(255, 255, 255, 55))
+        p.fillPath(ref_path, ref)
+
+        # ---- 4. Hover-подсветка (если под мышкой) ----
+        if self.underMouse():
+            hover = QPainterPath()
+            hover.addRoundedRect(rect, r, r)
+            p.fillPath(hover, QColor(255, 255, 255, 30))
+
+        # ---- 5. Внешняя рамка (светлая, полупрозрачная) ----
+        p.setPen(QColor(255, 255, 255, 180))
+        p.drawPath(path)
+
+        p.end()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self.update()
+        super().leaveEvent(event)
+
+
+class NoteCard(GlassCard):
     """Квадратная стеклянная карточка с цветом заметки."""
 
-    openRequested = Signal(int)          # двойной клик — открыть редактор
-    menuRequested = Signal(object, QPoint)  # нажали ⋯ (note, global pos)
+    openRequested = Signal(int)
+    menuRequested = Signal(object, QPoint)
 
     def __init__(self, note: Note, parent: Optional[QWidget] = None):
-        super().__init__(parent)
+        super().__init__(note.color, parent)
         self.note = note
-        self.setObjectName("card")
         self.setMinimumHeight(236)
         self.setMaximumHeight(236)
         self.setCursor(Qt.PointingHandCursor)
-        self._apply_color_style()
 
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(22)
-        shadow.setOffset(0, 5)
-        shadow.setColor(QColor(40, 80, 140, 80))
+        shadow.setBlurRadius(28)
+        shadow.setOffset(0, 7)
+        shadow.setColor(QColor(30, 70, 130, 90))
         self.setGraphicsEffect(shadow)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 10, 10)
         root.setSpacing(6)
 
-        # --- верхняя строка: 📌 ... ⋯ ---
+        # --- верхняя строка ---
         top = QHBoxLayout()
         top.setSpacing(4)
         self.pin_label = QLabel("⚑", self)
         self.pin_label.setToolTip("Закреплённая заметка")
         self.pin_label.setVisible(note.pinned)
+        self.pin_label.setStyleSheet(
+            "color: #d28c00; font-size: 13px; background: transparent;"
+        )
         top.addWidget(self.pin_label)
 
         self.type_label = QLabel(note.type_name, self)
         self.type_label.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: 10px; font-weight: 600;"
-            "background: rgba(255,255,255,110); border-radius: 7px; padding: 1px 7px;"
+            f"color: {C.TEXT_DARK}; font-size: 10px; font-weight: 700;"
+            "background: rgba(255,255,255,130); border-radius: 7px; padding: 1px 7px;"
+            "border: 1px solid rgba(255,255,255,180);"
         )
         top.addWidget(self.type_label)
         top.addStretch(1)
@@ -67,11 +147,14 @@ class NoteCard(QFrame):
         self.menu_btn.setFixedSize(QSize(30, 26))
         self.menu_btn.setStyleSheet(
             "QToolButton { border: none; border-radius: 9px; font-size: 15px;"
-            " font-weight: 700; color: #35506e; padding: 0 2px 3px 2px; }"
-            "QToolButton:hover { background: rgba(255,255,255,170); }"
+            " font-weight: 700; color: #35506e; padding: 0 2px 3px 2px;"
+            " background: transparent; }"
+            "QToolButton:hover { background: rgba(255,255,255,180); }"
         )
         self.menu_btn.clicked.connect(
-            lambda: self.menuRequested.emit(self.note, self.menu_btn.mapToGlobal(QPoint(0, 26)))
+            lambda: self.menuRequested.emit(
+                self.note, self.menu_btn.mapToGlobal(QPoint(0, 26))
+            )
         )
         top.addWidget(self.menu_btn, 0, Qt.AlignTop | Qt.AlignRight)
         root.addLayout(top)
@@ -84,56 +167,62 @@ class NoteCard(QFrame):
         self.title_label.setFont(title_font)
         self.title_label.setWordWrap(True)
         self.title_label.setMaximumHeight(44)
-        self.title_label.setStyleSheet(f"color: {C.TEXT_DARK}; border: none;")
+        self.title_label.setStyleSheet(
+            f"color: {C.TEXT_DARK}; border: none; background: transparent;"
+        )
         root.addWidget(self.title_label)
 
-        # --- превью содержимого ---
+        # --- превью ---
         self.preview_label = QLabel(self)
         self.preview_label.setWordWrap(True)
         self.preview_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.preview_label.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: 12px; border: none; line-height: 130%;"
+            f"color: {C.TEXT_MUTED}; font-size: 12px; border: none;"
+            "background: transparent; line-height: 130%;"
         )
         self.preview_label.setTextFormat(Qt.RichText)
         root.addWidget(self.preview_label, 1)
 
-        # --- превью картинки, если есть ---
+        # --- превью картинки ---
         self.thumb_label = QLabel(self)
         self.thumb_label.setStyleSheet("border: none; background: transparent;")
         self.thumb_label.setVisible(False)
         root.addWidget(self.thumb_label, 0, Qt.AlignLeft)
 
-        # --- нижняя строка: группа / картинки / дата ---
+        # --- нижняя строка ---
         bottom = QHBoxLayout()
         bottom.setSpacing(8)
         self.group_label = QLabel(self)
         self.group_label.setStyleSheet(
-            f"color: {C.TEXT_DARK}; font-size: 10px; font-weight: 600;"
-            "background: rgba(255,255,255,120); border-radius: 8px; padding: 2px 8px;"
+            f"color: {C.TEXT_DARK}; font-size: 10px; font-weight: 700;"
+            "background: rgba(255,255,255,130); border-radius: 8px; padding: 2px 8px;"
+            "border: 1px solid rgba(255,255,255,170);"
         )
         bottom.addWidget(self.group_label)
         self.img_label = QLabel(self)
-        self.img_label.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 10px; border: none;")
+        self.img_label.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: 10px; border: none; background: transparent;"
+        )
         bottom.addWidget(self.img_label)
         bottom.addStretch(1)
         self.date_label = QLabel(self)
-        self.date_label.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 10px; border: none;")
+        self.date_label.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: 10px; border: none; background: transparent;"
+        )
         bottom.addWidget(self.date_label)
         root.addLayout(bottom)
 
         self._fill()
 
     # ------------------------------------------------------------------
-    def _apply_color_style(self) -> None:
-        key = self.note.color
-        self.setStyleSheet(
-            f"QFrame#card {{ background-color: {C.rgba(key, 225)};"
-            f" border: 1px solid {C.border_rgba(key, 170)}; border-radius: 14px; }}"
-            f"QFrame#card:hover {{ background-color: {C.rgba(key, 242)}; }}"
-        )
+    def refresh(self, note: Note) -> None:
+        self.note = note
+        self.set_color(note.color)
+        self._fill()
 
     def _fill(self) -> None:
         n = self.note
+        self.pin_label.setVisible(n.pinned)
         self.title_label.setText(html.escape(n.display_title))
         self.preview_label.setText(self._preview_html())
 
@@ -193,7 +282,6 @@ class NoteCard(QFrame):
                 parts.append(body.replace("\n", "<br>"))
             return "<br>".join(parts) or "<i>Без описания</i>"
 
-        # обычная заметка
         text = n.content.strip()
         if not text:
             return "<i>Пустая заметка…</i>"
@@ -202,7 +290,7 @@ class NoteCard(QFrame):
         return html.escape(text).replace("\n", "<br>")
 
     # ------------------------------------------------------------------
-    def mouseDoubleClickEvent(self, event) -> None:
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             self.openRequested.emit(self.note.id)
         super().mouseDoubleClickEvent(event)

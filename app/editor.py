@@ -54,7 +54,7 @@ class ListRow(QFrame):
     def __init__(self, text: str = "", done: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setStyleSheet(
-            "ListRow { background: rgba(255,255,255,150); border-radius: 10px; }"
+            "ListRow { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(255,255,255,190), stop:1 rgba(240,250,255,165)); border: 1px solid rgba(255,255,255,210); border-radius: 11px; }"
         )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 3, 4, 3)
@@ -125,9 +125,17 @@ class NoteEditor(QDialog):
         self.title_edit = QLineEdit(self.note.title, self)
         self.title_edit.setPlaceholderText("Заголовок…")
         self.title_edit.setStyleSheet(
-            "QLineEdit { background: rgba(255,255,255,170); border: 1px solid"
-            " rgba(255,255,255,210); border-radius: 12px; padding: 10px 12px;"
-            " font-size: 16px; font-weight: 700; color: #23405E; }"
+            "QLineEdit {"
+            " background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "   stop:0 rgba(255,255,255,215), stop:1 rgba(240,250,255,195));"
+            " border: 1px solid rgba(255,255,255,230);"
+            " border-radius: 14px; padding: 10px 14px;"
+            " font-size: 16px; font-weight: 700; color: #23405E;"
+            "}"
+            "QLineEdit:focus {"
+            " background: rgba(255,255,255,235);"
+            " border: 1.5px solid rgba(140,195,240,210);"
+            "}"
         )
         self.title_edit.textChanged.connect(lambda: self._touch("title"))
         root.addWidget(self.title_edit)
@@ -170,17 +178,32 @@ class NoteEditor(QDialog):
     #  Сборка интерфейса
     # ==================================================================
     def _apply_bg(self) -> None:
-        self.setStyleSheet(
-            f"NoteEditor {{ background-color: {C.rgba(self.note.color, 215)}; }}"
-        )
+        base_r, base_g, base_b = C.base_rgb(self.note.color)
+        self.setStyleSheet(f"""
+            NoteEditor {{
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 rgba({base_r},{base_g},{base_b},210),
+                    stop:0.5 rgba({base_r},{base_g},{base_b},190),
+                    stop:1 rgba({max(0,base_r-22)},{max(0,base_g-22)},{max(0,base_b-22)},215));
+            }}
+        """)
 
     def _build_text_ui(self, placeholder: str = "") -> QTextEdit:
         self.text_edit = QTextEdit(self.note.content, self)
         self.text_edit.setPlaceholderText(placeholder)
         self.text_edit.setStyleSheet(
-            "QTextEdit { background: rgba(255,255,255,190); border: 1px solid"
-            " rgba(255,255,255,220); border-radius: 12px; padding: 10px;"
-            " font-size: 13px; color: #2a4258; }"
+            "QTextEdit {"
+            " background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "   stop:0 rgba(255,255,255,210), stop:1 rgba(240,250,255,195));"
+            " border: 1px solid rgba(255,255,255,230);"
+            " border-radius: 14px; padding: 12px;"
+            " font-size: 13px; color: #2a4258;"
+            "}"
+            "QTextEdit:focus {"
+            " background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "   stop:0 rgba(255,255,255,230), stop:1 rgba(240,250,255,215));"
+            " border: 1.5px solid rgba(140,195,240,210);"
+            "}"
         )
         self.text_edit.textChanged.connect(lambda: self._touch("text"))
         return self.text_edit
@@ -188,7 +211,9 @@ class NoteEditor(QDialog):
     def _build_task_meta(self) -> QWidget:
         frame = QFrame(self)
         frame.setStyleSheet(
-            "QFrame { background: rgba(255,255,255,150); border-radius: 12px; }"
+            "QFrame { background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 rgba(255,255,255,195), stop:1 rgba(240,250,255,175));"
+            " border: 1px solid rgba(255,255,255,220); border-radius: 14px; }"
         )
         lay = QHBoxLayout(frame)
         lay.setContentsMargins(10, 8, 10, 8)

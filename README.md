@@ -61,13 +61,22 @@ python main.py
 
 Чтобы получить одиночный exe-файл, который не требует Python:
 
-```bash
-pip install pyinstaller
-pyinstaller --onefile --windowed --name AeroNotes --add-data "assets;assets" main.py
+```
+python -m pip install --upgrade pyinstaller
+python -m PyInstaller --onefile --windowed --name AeroNotes --icon assets\icon.ico --add-data "assets;assets" main.py
 ```
 
-Готовый файл появится в `dist/AeroNotes.exe`. Рядом с ним приложение создаст
-папку `data/` с базой — её можно бэкапить одной копией.
+> Используйте `python -m PyInstaller`, а не просто `pyinstaller` —
+> так команда гарантированно попадёт в нужное окружение Python.
+
+Готовый файл появится в `dist\AeroNotes.exe`. При первом запуске приложение
+само создаст рядом с exe папку `data\` с базой заметок.
+Держите `data\` рядом с exe — это единственный файл, где хранятся ваши заметки.
+
+При первом запуске Windows может показать предупреждение SmartScreen —
+нажмите **«Подробнее» → «Выполнить в любом случае»**.
+
+Подробная инструкция со скриншотами: [docs/ЗАПУСК.md](docs/ЗАПУСК.md)
 
 ## Как устроены данные
 

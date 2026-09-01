@@ -5,8 +5,10 @@ from __future__ import annotations
 import random
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QRect, Qt, QTimer, QSize
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, QTimer, QSize
+from PySide6.QtGui import (
+    QAction, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPixmap,
+)
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
     QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QPushButton,
@@ -20,20 +22,24 @@ from .editor import NoteEditor
 from .formatting import fmt_clock, now_dt, plural
 from .models import Note, TYPE_LIST, TYPE_NOTE, TYPE_TASK, TYPE_NAMES
 from .note_card import NoteCard
-
-ASSETS_DIR = (__import__("pathlib").Path(__file__).resolve().parent.parent / "assets")
+from .paths import ASSETS_DIR
+from .reminder import ReminderManager, REMIND_OFFSETS
 
 SORT_MODES = [
-    ("created", "По дате создания"),
+    ("created",  "По дате создания"),
     ("modified", "По дате изменения"),
-    ("title", "По теме"),
-    ("color", "По цвету"),
-    ("status", "По статусу"),
+    ("title",    "По теме"),
+    ("color",    "По цвету"),
+    ("status",   "По статусу"),
 ]
 
 
+# ---------------------------------------------------------------------------
+#  Фоновый виджет
+# ---------------------------------------------------------------------------
+
 class BackgroundWidget(QWidget):
-    """Рисует обои Frutiger Aero + мягкую светлую вуаль, чтобы карточки читались."""
+    """Рисует обои Frutiger Aero + мягкую светлую вуаль."""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -44,13 +50,12 @@ class BackgroundWidget(QWidget):
             if not pm.isNull():
                 self._pix = pm
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event) -> None:  # noqa: N802
         p = QPainter(self)
         rect = self.rect()
         if self._pix is None:
-            # запасной градиент, если файла нет
-            top, bottom = QColor("#DFF1FB"), QColor("#E9F8EC")
             from PySide6.QtGui import QLinearGradient
+            top, bottom = QColor("#DFF1FB"), QColor("#E9F8EC")
             grad = QLinearGradient(rect.topLeft(), rect.bottomLeft())
             grad.setColorAt(0.0, top)
             grad.setColorAt(1.0, bottom)
@@ -61,12 +66,72 @@ class BackgroundWidget(QWidget):
             tw, th = int(pw * scale), int(ph * scale)
             x, y = (rect.width() - tw) // 2, (rect.height() - th) // 2
             p.drawPixmap(x, y, tw, th, self._pix)
-        # вуаль
-        p.fillRect(rect, QColor(255, 255, 255, 58))
-        veil = QColor(255, 255, 255, 70)
-        p.fillRect(QRect(0, 0, rect.width(), 140), veil)
+        p.fillRect(rect, QColor(255, 255, 255, 50))
         p.end()
 
+
+# ---------------------------------------------------------------------------
+#  Стеклянная панель — базовый виджет для TopBar и FilterPanel
+# ---------------------------------------------------------------------------
+
+class GlassPanel(QFrame):
+    """QFrame с нарисованным glass-фоном (без blur-зависимостей платформы)."""
+
+    def __init__(self, radius: int = 18, alpha_top: int = 210,
+                 alpha_bottom: int = 175, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._radius = radius
+        self._alpha_top = alpha_top
+        self._alpha_bottom = alpha_bottom
+        self.setAttribute(Qt.WA_StyledBackground, False)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        r = float(self._radius)
+
+        path = QPainterPath()
+        path.addRoundedRect(rect, r, r)
+
+        # Основное стекло — чисто белое с лёгким голубым оттенком снизу
+        body = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        body.setColorAt(0.0,  QColor(255, 255, 255, self._alpha_top))
+        body.setColorAt(0.6,  QColor(240, 248, 255, self._alpha_top - 20))
+        body.setColorAt(1.0,  QColor(220, 238, 252, self._alpha_bottom))
+        p.fillPath(path, body)
+
+        # Specular highlight — верхняя четверть
+        shine_h = rect.height() * 0.38
+        shine_rect = QRectF(rect.x(), rect.y(), rect.width(), shine_h)
+        shine_path = QPainterPath()
+        shine_path.addRoundedRect(shine_rect, r, r)
+        shine_path = shine_path.intersected(path)
+        shine = QLinearGradient(shine_rect.topLeft(), shine_rect.bottomLeft())
+        shine.setColorAt(0.0, QColor(255, 255, 255, 160))
+        shine.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.fillPath(shine_path, shine)
+
+        # Нижний рефлекс
+        ref_h = rect.height() * 0.18
+        ref_rect = QRectF(rect.x(), rect.bottom() - ref_h, rect.width(), ref_h)
+        ref_path = QPainterPath()
+        ref_path.addRoundedRect(ref_rect, r, r)
+        ref_path = ref_path.intersected(path)
+        ref = QLinearGradient(ref_rect.topLeft(), ref_rect.bottomLeft())
+        ref.setColorAt(0.0, QColor(255, 255, 255, 0))
+        ref.setColorAt(1.0, QColor(255, 255, 255, 60))
+        p.fillPath(ref_path, ref)
+
+        # Рамка — светлая полупрозрачная
+        p.setPen(QColor(200, 228, 248, 200))
+        p.drawPath(path)
+        p.end()
+
+
+# ---------------------------------------------------------------------------
+#  Главное окно
+# ---------------------------------------------------------------------------
 
 class MainWindow(QMainWindow):
     def __init__(self, db: Database):
@@ -86,7 +151,6 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(14, 10, 14, 12)
         outer.setSpacing(10)
 
-        # фон
         self.bg = BackgroundWidget(central)
         self.bg.lower()
 
@@ -107,14 +171,17 @@ class MainWindow(QMainWindow):
         self.scroll.viewport().installEventFilter(self)
         QTimer.singleShot(0, self.refresh)
 
+        # Напоминания — запускаем после появления окна
+        QTimer.singleShot(500, self._start_reminders)
+
     # ==================================================================
-    #  Верхняя панель (стекло)
+    #  Верхняя панель
     # ==================================================================
-    def _build_top_bar(self) -> QFrame:
-        bar = QFrame(self)
+    def _build_top_bar(self) -> GlassPanel:
+        bar = GlassPanel(radius=20, alpha_top=215, alpha_bottom=180, parent=self)
         bar.setObjectName("topBar")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setContentsMargins(14, 8, 14, 8)
         lay.setSpacing(8)
 
         app_label = QLabel("✦ Aero Notes", bar)
@@ -163,6 +230,22 @@ class MainWindow(QMainWindow):
         self.archive_btn.toggled.connect(lambda _: self.refresh())
         lay.addWidget(self.archive_btn)
 
+        # Настройки напоминаний
+        remind_lbl = QLabel("⚑", bar)
+        remind_lbl.setToolTip("Напоминания о дедлайнах")
+        remind_lbl.setStyleSheet(
+            "color: #c8960a; font-size: 14px; background: transparent; padding: 0 2px;"
+        )
+        lay.addWidget(remind_lbl)
+
+        self.remind_combo = QComboBox(bar)
+        for label, _ in REMIND_OFFSETS:
+            self.remind_combo.addItem(label)
+        self.remind_combo.setCurrentIndex(1)  # «За 1 час»
+        self.remind_combo.setToolTip("За сколько до дедлайна напоминать")
+        self.remind_combo.currentIndexChanged.connect(self._on_remind_changed)
+        lay.addWidget(self.remind_combo)
+
         self.new_btn = QToolButton(bar)
         self.new_btn.setText("+  Создать")
         self.new_btn.setObjectName("newButton")
@@ -178,26 +261,30 @@ class MainWindow(QMainWindow):
         return bar
 
     # ==================================================================
-    #  Панель фильтров (маленькая, раскрывающаяся)
+    #  Панель фильтров
     # ==================================================================
     def _build_filter_panel(self) -> None:
-        panel = QFrame(self)
+        panel = GlassPanel(radius=16, alpha_top=205, alpha_bottom=170, parent=self)
         panel.setObjectName("filterPanel")
         panel.setFixedWidth(235)
         panel.setVisible(False)
         self.filter_panel = panel
         lay = QVBoxLayout(panel)
-        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setContentsMargins(14, 12, 14, 14)
         lay.setSpacing(6)
 
         head = QHBoxLayout()
         t = QLabel("Фильтр", panel)
-        t.setStyleSheet("font-size: 13px; font-weight: 700; color: #23405E;")
+        t.setStyleSheet("font-size: 13px; font-weight: 700; color: #23405E; background: transparent;")
         head.addWidget(t)
         head.addStretch(1)
         reset = QPushButton("Сбросить", panel)
         reset.setFlat(True)
-        reset.setStyleSheet("color: #4a7db3; font-size: 11px; border: none;")
+        reset.setStyleSheet(
+            "QPushButton { color: #4a7db3; font-size: 11px; border: none;"
+            " background: transparent; padding: 2px 6px; border-radius: 8px; }"
+            "QPushButton:hover { background: rgba(74,125,179,40); }"
+        )
         reset.clicked.connect(self._reset_filters)
         head.addWidget(reset)
         lay.addLayout(head)
@@ -207,7 +294,11 @@ class MainWindow(QMainWindow):
         self._rebuild_group_checks()
         add_group = QPushButton("+ Новая группа…", panel)
         add_group.setFlat(True)
-        add_group.setStyleSheet("color: #4a7db3; font-size: 11px; border: none;")
+        add_group.setStyleSheet(
+            "QPushButton { color: #4a7db3; font-size: 11px; border: none;"
+            " background: transparent; padding: 2px 6px; border-radius: 8px; }"
+            "QPushButton:hover { background: rgba(74,125,179,40); }"
+        )
         add_group.clicked.connect(self._add_group)
         lay.addWidget(add_group)
 
@@ -241,9 +332,9 @@ class MainWindow(QMainWindow):
             b.setCheckable(True)
             b.setToolTip(name)
             b.setStyleSheet(
-                f"QToolButton {{ background: {hexcol}; border: 1px solid rgba(60,90,120,120);"
+                f"QToolButton {{ background: {hexcol}; border: 1px solid rgba(60,90,120,100);"
                 f" border-radius: 8px; }}"
-                f"QToolButton:checked {{ border: 2px solid #3a6ea5; }}"
+                f"QToolButton:checked {{ border: 2.5px solid #3a6ea5; }}"
             )
             b.toggled.connect(lambda _, k=key: self.refresh())
             self.color_btns[key] = b
@@ -255,7 +346,8 @@ class MainWindow(QMainWindow):
     def _section(self, text: str) -> QLabel:
         lab = QLabel(text.upper(), self.filter_panel)
         lab.setStyleSheet(
-            "color: #5A7188; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
+            "color: #5A7188; font-size: 10px; font-weight: 700;"
+            "letter-spacing: 1px; background: transparent;"
         )
         return lab
 
@@ -268,7 +360,6 @@ class MainWindow(QMainWindow):
             cb.deleteLater()
         self.group_checks = []
         lay = self.filter_panel.layout()
-        # после заголовка раздела «Группы» (индексы 0–1) идут чекбоксы
         insert_at = 2
         for g in self.db.groups():
             cb = QCheckBox(g.name, self.filter_panel)
@@ -314,7 +405,9 @@ class MainWindow(QMainWindow):
         self.grid.setContentsMargins(6, 6, 6, 6)
         self.grid.setSpacing(16)
 
-        self.empty_label = QLabel("Здесь пока пусто — создайте первую заметку ✦", board)
+        self.empty_label = QLabel(
+            "Здесь пока пусто — создайте первую заметку ✦", board
+        )
         self.empty_label.setObjectName("emptyLabel")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setVisible(False)
@@ -386,11 +479,10 @@ class MainWindow(QMainWindow):
                 return n.display_title.lower()
             if mode == "color":
                 return C.color_index(n.color)
-            # статус: сначала активные, затем по дедлайну
             return (1 if n.is_done() else 0, n.deadline or "")
 
         pinned = sorted((n for n in notes if n.pinned), key=key, reverse=self.sort_desc)
-        rest = sorted((n for n in notes if not n.pinned), key=key, reverse=self.sort_desc)
+        rest   = sorted((n for n in notes if not n.pinned), key=key, reverse=self.sort_desc)
         return pinned + rest
 
     def _flip_sort_dir(self) -> None:
@@ -438,6 +530,21 @@ class MainWindow(QMainWindow):
 
     def _tick(self) -> None:
         self.clock_label.setText(fmt_clock(now_dt()))
+
+    # ==================================================================
+    #  Напоминания
+    # ==================================================================
+    def _start_reminders(self) -> None:
+        self._reminder_mgr = ReminderManager(
+            db=self.db,
+            parent_window=self,
+            open_note_callback=self._open_editor,
+        )
+        self._reminder_mgr.set_offset(self.remind_combo.currentIndex())
+
+    def _on_remind_changed(self, idx: int) -> None:
+        if hasattr(self, "_reminder_mgr"):
+            self._reminder_mgr.set_offset(idx)
 
     # ==================================================================
     #  Действия
@@ -555,92 +662,130 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _menu_qss(self) -> str:
         return """
-            QMenu { background: rgba(250,252,255,245); border: 1px solid rgba(140,170,200,190);
-                    border-radius: 12px; padding: 6px; font-size: 13px; color: #2A4258; }
-            QMenu::item { padding: 6px 26px 6px 12px; border-radius: 8px; }
-            QMenu::item:selected { background: rgba(120,180,230,150); }
-            QMenu::separator { height: 1px; background: rgba(140,170,200,110); margin: 5px 8px; }
+            QMenu {
+                background: rgba(240,250,255,235);
+                border: 1px solid rgba(200,225,245,220);
+                border-radius: 14px; padding: 6px;
+                font-size: 13px; color: #2A4258;
+            }
+            QMenu::item { padding: 6px 26px 6px 14px; border-radius: 9px; }
+            QMenu::item:selected { background: rgba(130,190,240,160); }
+            QMenu::separator {
+                height: 1px; background: rgba(160,200,235,130); margin: 5px 10px;
+            }
         """
 
     def _apply_style(self) -> None:
         self.setStyleSheet(f"""
             MainWindow, BackgroundWidget {{ background: #E4F2FB; }}
-            QFrame#topBar {{
-                background: rgba(255,255,255,120);
-                border: 1px solid rgba(255,255,255,170);
-                border-radius: 18px;
-            }}
+
+            /* GlassPanel рисует себя сам через paintEvent, QSS только для дочерних */
+            GlassPanel {{ background: transparent; border: none; }}
+
             QLabel#brandLabel {{
-                color: #23507E; font-size: 14px; font-weight: 800;
-                background: rgba(255,255,255,90); border-radius: 12px; padding: 5px 12px;
+                color: #1a3d6b; font-size: 14px; font-weight: 800;
+                background: rgba(255,255,255,140); border-radius: 12px;
+                padding: 5px 14px;
+                border: 1px solid rgba(255,255,255,210);
             }}
             QLabel#clockLabel {{
                 color: #1E3A5F; font-size: 12px; font-weight: 600;
-                background: rgba(255,255,255,80); border-radius: 12px; padding: 6px 12px;
+                background: rgba(255,255,255,120); border-radius: 12px;
+                padding: 6px 12px;
+                border: 1px solid rgba(255,255,255,190);
             }}
-            QLabel#countLabel {{ color: rgba(30,58,95,170); font-size: 11px; padding: 0 6px; }}
-            QLabel#emptyLabel {{ color: rgba(30,58,95,190); font-size: 15px; }}
+            QLabel#countLabel {{ color: rgba(30,58,95,170); font-size: 11px; padding: 0 6px; background: transparent; }}
+            QLabel#emptyLabel {{ color: rgba(30,58,95,190); font-size: 15px; background: transparent; }}
 
             QLineEdit {{
-                background: rgba(255,255,255,160); border: 1px solid rgba(255,255,255,200);
-                border-radius: 16px; padding: 7px 14px; font-size: 12px; color: #2A4258;
+                background: rgba(255,255,255,175);
+                border: 1px solid rgba(255,255,255,215);
+                border-radius: 16px; padding: 7px 14px;
+                font-size: 12px; color: #2A4258;
                 selection-background-color: rgba(120,180,230,180);
             }}
-            QComboBox {{
-                background: rgba(255,255,255,160); border: 1px solid rgba(255,255,255,200);
-                border-radius: 14px; padding: 6px 12px; font-size: 12px; color: #2A4258;
+            QLineEdit:focus {{
+                background: rgba(255,255,255,210);
+                border: 1.5px solid rgba(140,195,240,200);
             }}
+            QComboBox {{
+                background: rgba(255,255,255,170);
+                border: 1px solid rgba(255,255,255,210);
+                border-radius: 14px; padding: 6px 12px;
+                font-size: 12px; color: #2A4258;
+            }}
+            QComboBox:hover {{ background: rgba(255,255,255,210); }}
             QComboBox::drop-down {{ border: none; width: 24px; }}
             QComboBox QAbstractItemView {{
-                background: rgba(252,253,255,245); border: 1px solid rgba(140,170,200,190);
-                border-radius: 10px; selection-background-color: rgba(120,180,230,150);
+                background: rgba(245,251,255,245);
+                border: 1px solid rgba(170,210,240,200);
+                border-radius: 12px;
+                selection-background-color: rgba(130,190,240,160);
                 outline: none; padding: 4px;
             }}
             QToolButton {{
-                background: rgba(255,255,255,160); border: 1px solid rgba(255,255,255,200);
-                border-radius: 14px; padding: 6px 12px; font-size: 12px; color: #2A4258;
+                background: rgba(255,255,255,170);
+                border: 1px solid rgba(255,255,255,210);
+                border-radius: 14px; padding: 6px 12px;
+                font-size: 12px; color: #2A4258;
             }}
-            QToolButton:hover {{ background: rgba(255,255,255,215); }}
+            QToolButton:hover {{ background: rgba(255,255,255,220); }}
             QToolButton::menu-indicator {{ image: none; }}
             QToolButton#newButton {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba(150,205,245,235), stop:1 rgba(95,165,220,235));
-                color: white; font-weight: 700; border: 1px solid rgba(255,255,255,220);
+                    stop:0 rgba(155,210,250,235), stop:1 rgba(90,160,220,235));
+                color: white; font-weight: 700;
+                border: 1px solid rgba(255,255,255,230);
             }}
             QToolButton#newButton:hover {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba(165,215,250,245), stop:1 rgba(110,180,235,245));
+                    stop:0 rgba(170,220,255,245), stop:1 rgba(105,175,235,245));
             }}
             QPushButton {{
-                background: rgba(255,255,255,160); border: 1px solid rgba(255,255,255,200);
-                border-radius: 14px; padding: 6px 14px; font-size: 12px; color: #2A4258;
+                background: rgba(255,255,255,170);
+                border: 1px solid rgba(255,255,255,210);
+                border-radius: 14px; padding: 6px 14px;
+                font-size: 12px; color: #2A4258;
             }}
-            QPushButton:hover {{ background: rgba(255,255,255,215); }}
+            QPushButton:hover {{ background: rgba(255,255,255,225); }}
             QPushButton:checked {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 rgba(150,205,245,235), stop:1 rgba(100,168,225,235));
+                    stop:0 rgba(155,210,250,235), stop:1 rgba(95,165,225,235));
                 color: white; font-weight: 600;
+                border: 1px solid rgba(255,255,255,220);
             }}
-            QFrame#filterPanel {{
-                background: rgba(255,255,255,130);
-                border: 1px solid rgba(255,255,255,170); border-radius: 16px;
+
+            /* Панель фильтров — GlassPanel рисует фон, стили для дочерних */
+            GlassPanel QCheckBox {{
+                color: #2A4258; font-size: 12px; spacing: 7px;
+                background: transparent;
             }}
-            QFrame#filterPanel QCheckBox {{ color: #2A4258; font-size: 12px; spacing: 7px; }}
+            GlassPanel QCheckBox::indicator {{
+                width: 15px; height: 15px; border-radius: 4px;
+                background: rgba(255,255,255,160);
+                border: 1px solid rgba(130,170,210,160);
+            }}
+            GlassPanel QCheckBox::indicator:checked {{
+                background: rgba(100,170,230,200);
+                border: 1px solid rgba(80,140,200,200);
+            }}
 
             QScrollArea {{ background: transparent; border: none; }}
             QWidget#board {{ background: transparent; }}
             QScrollBar:vertical {{
-                background: rgba(255,255,255,60); width: 10px; border-radius: 5px; margin: 2px;
+                background: rgba(255,255,255,60); width: 10px;
+                border-radius: 5px; margin: 2px;
             }}
             QScrollBar::handle:vertical {{
-                background: rgba(90,140,190,140); border-radius: 5px; min-height: 40px;
+                background: rgba(90,140,190,130); border-radius: 5px; min-height: 40px;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             QScrollBar:horizontal {{
-                background: rgba(255,255,255,60); height: 10px; border-radius: 5px; margin: 2px;
+                background: rgba(255,255,255,60); height: 10px;
+                border-radius: 5px; margin: 2px;
             }}
             QScrollBar::handle:horizontal {{
-                background: rgba(90,140,190,140); border-radius: 5px; min-width: 40px;
+                background: rgba(90,140,190,130); border-radius: 5px; min-width: 40px;
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
             {self._menu_qss()}
